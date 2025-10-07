@@ -60,9 +60,8 @@ Deploying Assesy is a straightforward process, thanks to its containerized archi
 
 If you find this project helpful, consider supporting its development:
 
-\<a href="[https://buymeacoffee.com/adarshr](https://buymeacoffee.com/adarshr)"\>
-\<img src="[https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge\&logo=buy-me-a-coffee\&logoColor=black](https://www.google.com/search?q=https://img.shields.io/badge/Buy%2520Me%2520a%2520Coffee-ffdd00%3Fstyle%3Dfor-the-badge%26logo%3Dbuy-me-a-coffee%26logoColor%3Dblack)" alt="Buy Me a Coffee"\>
-\</a\>
+<a href="https://www.buymeacoffee.com/adarshr" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 37px !important;width: 170px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
 
 -----
 

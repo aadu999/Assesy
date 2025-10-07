@@ -1,0 +1,122 @@
+# ============================================
+# Runtime & Dynamic Data (Session-per-Container)
+# ============================================
+
+# Assessment files (templates uploaded by admins)
+backend/assessment_files/*/
+!backend/assessment_files/.gitkeep
+
+# Candidate submissions
+backend/submissions/
+!backend/submissions/.gitkeep
+
+# Temporary session directories
+backend/temp/
+**/temp/
+
+# ============================================
+# Node.js / Backend
+# ============================================
+
+# Dependencies
+node_modules/
+backend/node_modules/
+**/node_modules/
+
+# Package lock files (optional - choose based on your team's preference)
+# package-lock.json
+# npm-debug.log*
+# yarn-error.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================
+# Docker
+# ============================================
+
+# Docker volumes data
+*_data/
+
+# Docker override files (for local development)
+docker-compose.override.yml
+
+# ============================================
+# VS Code Extension Development
+# ============================================
+
+# Compiled extension output (keep the .vsix for deployment)
+code-server/extensions-src/**/dist/
+code-server/extensions-src/**/out/
+code-server/extensions-src/**/*.js.map
+
+# Extension development dependencies
+code-server/extensions-src/**/node_modules/
+
+# ============================================
+# IDE & Editor
+# ============================================
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# ============================================
+# Operating System
+# ============================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================
+# Archives & Backups
+# ============================================
+
+*.zip
+!code-server/extensions/*.vsix
+*.tar.gz
+*.rar
+*.7z
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# ============================================
+# Security & Secrets
+# ============================================
+
+# Private keys
+*.pem
+*.key
+*.cert
+
+# JWT secrets (should be in .env anyway)
+secrets/

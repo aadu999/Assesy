@@ -1,0 +1,4 @@
+{
+  "watch": ["."],
+  "ignore": ["submissions/*", "node_modules/*"]
+}

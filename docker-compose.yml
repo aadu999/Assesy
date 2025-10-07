@@ -1,0 +1,86 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: backend-service
+    restart: unless-stopped
+    command: npm run dev
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend:/app
+      - /app/node_modules
+      # Mount host /tmp so session files can be accessed by dynamically created containers
+      - /tmp/interview-sessions:/tmp/interview-sessions
+    environment:
+      - DATABASE_URL=postgres://user:password@database:5432/interviewdb
+      - NODE_ENV=development
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.interview.localhost`)"
+      - "traefik.http.services.backend-service.loadbalancer.server.port=3000"
+    networks:
+      - default_network
+    depends_on:
+      database:
+        condition: service_healthy
+
+  database:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    restart: unless-stopped
+    volumes:
+      - assesy_db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=interviewdb
+    ports:
+      - "5433:5432"
+    networks:
+      - default_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d interviewdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik-proxy
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8081:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default_network
+
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+    container_name: admin-frontend-service
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin.rule=Host(`admin.interview.localhost`)"
+      - "traefik.http.services.admin-service.loadbalancer.server.port=80"
+    networks:
+      - default_network
+
+  # NOTE: code-server containers are created dynamically by the backend
+  # Do NOT define a static code-server service here
+
+networks:
+  default_network:
+    name: assesy_default_network
+    driver: bridge
+
+volumes:
+  assesy_db_data:
+    driver: local

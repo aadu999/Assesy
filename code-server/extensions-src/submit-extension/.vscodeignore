@@ -1,0 +1,4 @@
+#Ignore node_modules, source files, and build configs from the final package
+node_modules
+esbuild.config.js
+!dist/

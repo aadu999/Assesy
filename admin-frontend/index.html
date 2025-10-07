@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Platform - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --primary: #6a89a7;
+        --secondary: #bdddfc;
+        --accent: #88bdf2;
+        --dark: #384959;
+        --light: #f8fafb;
+      }
+      * {
+        font-family: "Inter", sans-serif;
+      }
+      body {
+        background: linear-gradient(135deg, #f8fafb 0%, #e8f0f5 100%);
+        min-height: 100vh;
+      }
+
+      .glass-card {
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(189, 221, 252, 0.2);
+        box-shadow: 0 8px 32px rgba(106, 137, 167, 0.08);
+      }
+
+      .glass-card:hover {
+        box-shadow: 0 12px 48px rgba(106, 137, 167, 0.12);
+      }
+
+      .nav-item {
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .nav-item::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 3px;
+        background: linear-gradient(180deg, #88bdf2 0%, #6a89a7 100%);
+        transform: scaleY(0);
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .nav-item.active::before {
+        transform: scaleY(1);
+      }
+
+      .nav-item.active {
+        background: linear-gradient(
+          90deg,
+          rgba(136, 189, 242, 0.12) 0%,
+          rgba(255, 255, 255, 0) 100%
+        );
+        color: #384959;
+        font-weight: 600;
+      }
+
+      .card {
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        border: 1px solid rgba(189, 221, 252, 0.3);
+      }
+
+      .card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 20px 60px rgba(106, 137, 167, 0.15);
+        border-color: rgba(136, 189, 242, 0.5);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #88bdf2 0%, #6a89a7 100%);
+        box-shadow: 0 4px 16px rgba(136, 189, 242, 0.3);
+        transition: all 0.3s ease;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(136, 189, 242, 0.4);
+      }
+
+      .stat-card {
+        background: linear-gradient(
+          135deg,
+          rgba(136, 189, 242, 0.15) 0%,
+          rgba(189, 221, 252, 0.1) 100%
+        );
+        border: 1px solid rgba(136, 189, 242, 0.2);
+      }
+
+      .file-item {
+        transition: all 0.25s ease;
+        border-left: 2px solid transparent;
+      }
+
+      .file-item:hover {
+        background: rgba(136, 189, 242, 0.08);
+        border-left-color: #88bdf2;
+        transform: translateX(4px);
+      }
+
+      .file-item.active {
+        background: linear-gradient(
+          90deg,
+          rgba(136, 189, 242, 0.15) 0%,
+          rgba(136, 189, 242, 0.05) 100%
+        );
+        border-left-color: #6a89a7;
+        font-weight: 500;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 14px;
+        border-radius: 24px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.025em;
+      }
+
+      .badge-success {
+        background: #10b981;
+        color: white;
+      }
+      .badge-warning {
+        background: #f59e0b;
+        color: white;
+      }
+      .badge-info {
+        background: #88bdf2;
+        color: white;
+      }
+      .badge-danger {
+        background: #ef4444;
+        color: white;
+      }
+
+      .modal-overlay {
+        backdrop-filter: blur(12px);
+      }
+
+      .code-preview {
+        max-height: 500px;
+        overflow-y: auto;
+        border-radius: 12px;
+        border: 1px solid rgba(189, 221, 252, 0.2);
+      }
+
+      textarea.code-editor {
+        font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .floating {
+        animation: float 6s ease-in-out infinite;
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0px);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #88bdf2;
+        box-shadow: 0 0 0 3px rgba(136, 189, 242, 0.1);
+      }
+
+      .view-content {
+        animation: fadeIn 0.4s ease-in-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Login View -->
+    <div
+      id="loginView"
+      class="min-h-screen flex items-center justify-center px-4"
+    >
+      <div
+        class="glass-card w-full max-w-md p-10 rounded-3xl shadow-2xl floating"
+      >
+        <div class="text-center mb-10">
+          <div
+            class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-[#88BDF2] to-[#6A89A7] flex items-center justify-center text-white text-2xl font-bold"
+          >
+            IP
+          </div>
+          <h1 class="text-3xl font-bold text-[#384959]">Interview Platform</h1>
+          <p class="text-[#6A89A7] mt-2 font-medium">Admin Portal</p>
+        </div>
+        <form id="loginForm" class="space-y-5">
+          <div>
+            <label class="block text-sm font-semibold text-[#384959] mb-2"
+              >Username</label
+            >
+            <input
+              type="text"
+              id="username"
+              value="admin"
+              required
+              class="w-full px-4 py-3 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-[#384959] mb-2"
+              >Password</label
+            >
+            <input
+              type="password"
+              id="password"
+              value="password"
+              required
+              class="w-full px-4 py-3 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+            />
+          </div>
+          <button
+            type="submit"
+            class="w-full btn-primary text-white py-3.5 rounded-xl font-semibold text-base"
+          >
+            Sign In
+          </button>
+          <p
+            id="loginError"
+            class="text-red-500 text-sm mt-3 text-center font-medium"
+          ></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboardView" class="hidden min-h-screen p-6">
+      <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="glass-card rounded-3xl p-8 mb-6 shadow-lg">
+          <div class="flex justify-between items-center">
+            <div>
+              <h1 class="text-4xl font-bold text-[#384959] mb-1">
+                Admin Dashboard
+              </h1>
+              <p class="text-[#6A89A7] font-medium">
+                Manage interviews, assessments, and submissions
+              </p>
+            </div>
+            <div class="flex items-center gap-4">
+              <div class="stat-card px-8 py-4 rounded-2xl backdrop-blur-sm">
+                <div class="text-sm text-[#6A89A7] font-medium mb-1">
+                  Active Sessions
+                </div>
+                <div
+                  class="text-3xl font-bold text-[#384959]"
+                  id="activeSessionsCount"
+                >
+                  0
+                </div>
+              </div>
+              <div class="stat-card px-8 py-4 rounded-2xl backdrop-blur-sm">
+                <div class="text-sm text-[#6A89A7] font-medium mb-1">
+                  Submissions
+                </div>
+                <div
+                  class="text-3xl font-bold text-[#384959]"
+                  id="submissionsCount"
+                >
+                  0
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-5 gap-6">
+          <!-- Sidebar Navigation -->
+          <div class="col-span-1">
+            <div class="glass-card rounded-3xl p-4 shadow-lg">
+              <nav class="space-y-2">
+                <div
+                  class="nav-item active px-5 py-4 rounded-2xl font-semibold text-[#384959]"
+                  data-view="sessions"
+                >
+                  <span class="text-xl mr-3">📊</span> Sessions
+                </div>
+                <div
+                  class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]"
+                  data-view="submissions"
+                >
+                  <span class="text-xl mr-3">📁</span> Submissions
+                </div>
+                <div
+                  class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]"
+                  data-view="assessments"
+                >
+                  <span class="text-xl mr-3">📝</span> Assessments
+                </div>
+                <div
+                  class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]"
+                  data-view="create"
+                >
+                  <span class="text-xl mr-3">✨</span> Create Session
+                </div>
+              </nav>
+            </div>
+          </div>
+
+          <!-- Main Content Area -->
+          <div class="col-span-4">
+            <!-- Sessions View -->
+            <div id="sessionsView" class="view-content">
+              <div class="glass-card rounded-3xl p-8 shadow-lg">
+                <div class="flex justify-between items-center mb-8">
+                  <h2 class="text-3xl font-bold text-[#384959]">
+                    All Sessions
+                  </h2>
+                  <button
+                    id="refreshSessionsBtn"
+                    class="px-6 py-3 bg-white rounded-xl hover:bg-[#F8FAFB] transition font-semibold text-[#384959] border border-[#BDDDFC]/30"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+                <div
+                  class="overflow-hidden rounded-2xl border border-[#BDDDFC]/30"
+                >
+                  <table class="w-full">
+                    <thead class="bg-gradient-to-r from-[#F8FAFB] to-white">
+                      <tr>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Candidate
+                        </th>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Position
+                        </th>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Assessment
+                        </th>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Status
+                        </th>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Created
+                        </th>
+                        <th
+                          class="text-left py-5 px-6 font-bold text-[#384959] text-sm"
+                        >
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      id="sessionsTableBody"
+                      class="divide-y divide-[#BDDDFC]/20"
+                    ></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Submissions View -->
+            <div id="submissionsView" class="view-content hidden">
+              <div class="glass-card rounded-3xl p-8 shadow-lg">
+                <h2 class="text-3xl font-bold text-[#384959] mb-8">
+                  Candidate Submissions
+                </h2>
+                <div id="submissionsGrid" class="grid grid-cols-1 gap-5"></div>
+              </div>
+            </div>
+
+            <!-- Assessments View -->
+            <div id="assessmentsView" class="view-content hidden">
+              <div class="glass-card rounded-3xl p-8 shadow-lg">
+                <div class="flex justify-between items-center mb-8">
+                  <h2 class="text-3xl font-bold text-[#384959]">
+                    Assessment Library
+                  </h2>
+                  <button
+                    id="createAssessmentBtn"
+                    class="btn-primary px-8 py-3.5 text-white rounded-xl font-semibold"
+                  >
+                    + New Assessment
+                  </button>
+                </div>
+                <div id="assessmentsGrid" class="grid grid-cols-2 gap-6"></div>
+              </div>
+            </div>
+
+            <!-- Create Session View -->
+            <div id="createView" class="view-content hidden">
+              <div class="glass-card rounded-3xl p-10 shadow-lg max-w-2xl">
+                <h2 class="text-3xl font-bold text-[#384959] mb-8">
+                  Create Interview Session
+                </h2>
+                <form id="sessionForm" class="space-y-6">
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3"
+                      >Assessment</label
+                    >
+                    <select
+                      id="assessmentSelect"
+                      required
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+                    ></select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3"
+                      >Candidate Name</label
+                    >
+                    <input
+                      type="text"
+                      id="candidateName"
+                      required
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3"
+                      >Position</label
+                    >
+                    <input
+                      type="text"
+                      id="position"
+                      required
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    class="w-full btn-primary text-white py-4 rounded-xl font-bold text-lg"
+                  >
+                    Generate Interview Link
+                  </button>
+                </form>
+                <div
+                  id="linkContainer"
+                  class="hidden mt-8 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl border-2 border-green-200"
+                >
+                  <label class="block text-sm font-bold text-[#384959] mb-3"
+                    >Shareable Link</label
+                  >
+                  <div class="flex gap-3">
+                    <input
+                      type="text"
+                      id="shareableLink"
+                      readonly
+                      class="flex-1 px-4 py-3 bg-white rounded-xl border border-green-200"
+                    />
+                    <button
+                      id="copyButton"
+                      class="px-8 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p
+                    id="copyFeedback"
+                    class="text-green-600 text-sm mt-3 text-center font-semibold"
+                  ></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Submission Detail Modal -->
+    <div
+      id="submissionModal"
+      class="hidden fixed inset-0 modal-overlay bg-black/20 flex items-center justify-center p-6 z-50"
+    >
+      <div
+        class="glass-card w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl shadow-2xl flex flex-col"
+      >
+        <div
+          class="p-8 border-b border-[#BDDDFC]/20 flex justify-between items-center bg-gradient-to-r from-[#F8FAFB] to-white"
+        >
+          <h3
+            class="text-2xl font-bold text-[#384959]"
+            id="submissionModalTitle"
+          ></h3>
+          <button
+            id="closeSubmissionModal"
+            class="text-[#6A89A7] hover:text-[#384959] text-3xl font-bold transition"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-8">
+          <div class="grid grid-cols-3 gap-8">
+            <div class="col-span-1 space-y-5">
+              <div
+                class="bg-gradient-to-br from-[#BDDDFC]/20 to-[#88BDF2]/10 p-6 rounded-2xl border border-[#88BDF2]/20"
+              >
+                <h4 class="font-bold text-[#384959] mb-4 text-lg">
+                  📋 Candidate Info
+                </h4>
+                <div id="candidateDetails" class="space-y-3 text-sm"></div>
+              </div>
+              <div class="space-y-3">
+                <button
+                  id="downloadSubmissionBtn"
+                  class="w-full px-4 py-3.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition shadow-md"
+                >
+                  ⬇️ Download ZIP
+                </button>
+                <button
+                  id="reviewSubmissionBtn"
+                  class="w-full px-4 py-3.5 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition shadow-md"
+                >
+                  🖥️ Open in Code-Server
+                </button>
+                <button
+                  id="stopReviewBtn"
+                  class="w-full px-4 py-3.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition shadow-md hidden"
+                >
+                  🛑 Stop Review
+                </button>
+              </div>
+            </div>
+            <div class="col-span-2">
+              <div
+                class="bg-white rounded-2xl border border-[#BDDDFC]/30 overflow-hidden shadow-sm"
+              >
+                <div class="grid grid-cols-4">
+                  <div
+                    class="col-span-1 bg-[#F8FAFB] border-r border-[#BDDDFC]/20 p-5 max-h-[600px] overflow-y-auto"
+                  >
+                    <h4 class="font-bold text-[#384959] mb-4 text-sm">
+                      📂 Files
+                    </h4>
+                    <div id="fileTree" class="space-y-1"></div>
+                  </div>
+                  <div class="col-span-3 p-6">
+                    <div
+                      id="fileViewer"
+                      class="text-[#6A89A7] text-center py-16"
+                    >
+                      Select a file to preview
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assessment Editor Modal -->
+    <div
+      id="assessmentEditorModal"
+      class="hidden fixed inset-0 modal-overlay bg-black/20 flex items-center justify-center p-6 z-50"
+    >
+      <div
+        class="glass-card w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl shadow-2xl flex flex-col"
+      >
+        <div
+          class="p-8 border-b border-[#BDDDFC]/20 flex justify-between items-center bg-gradient-to-r from-[#F8FAFB] to-white"
+        >
+          <h3
+            class="text-2xl font-bold text-[#384959]"
+            id="assessmentEditorTitle"
+          ></h3>
+          <button
+            id="closeAssessmentEditor"
+            class="text-[#6A89A7] hover:text-[#384959] text-3xl font-bold transition"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-8">
+          <div class="grid grid-cols-4 gap-8">
+            <div class="col-span-1">
+              <div
+                class="bg-gradient-to-br from-[#BDDDFC]/20 to-[#88BDF2]/10 p-5 rounded-2xl border border-[#88BDF2]/20"
+              >
+                <div class="flex justify-between items-center mb-4">
+                  <h4 class="font-bold text-[#384959]">📁 Files</h4>
+                  <button
+                    id="addFileBtn"
+                    class="text-3xl text-green-600 hover:text-green-700 transition leading-none"
+                  >
+                    +
+                  </button>
+                </div>
+                <div id="assessmentFileTree" class="space-y-1"></div>
+                <input type="file" id="newAssessmentFile" class="hidden" />
+              </div>
+            </div>
+            <div class="col-span-3">
+              <div
+                id="assessmentFileEditor"
+                class="text-[#6A89A7] text-center py-16"
+              >
+                Select a file to edit
+              </div>
+              <div id="editorActions" class="hidden mt-6 flex gap-3">
+                <button
+                  id="saveFileBtn"
+                  class="px-8 py-3.5 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition shadow-md"
+                >
+                  💾 Save
+                </button>
+                <button
+                  id="deleteFileBtn"
+                  class="px-8 py-3.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition shadow-md"
+                >
+                  🗑️ Delete
+                </button>
+                <button
+                  id="cancelEditBtn"
+                  class="px-8 py-3.5 bg-gray-200 text-[#384959] rounded-xl font-semibold hover:bg-gray-300 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Assessment Modal -->
+    <div
+      id="createAssessmentModal"
+      class="hidden fixed inset-0 modal-overlay bg-black/20 flex items-center justify-center p-6 z-50"
+    >
+      <div class="glass-card w-full max-w-xl rounded-3xl shadow-2xl p-10">
+        <div class="flex justify-between items-center mb-8">
+          <h3 class="text-2xl font-bold text-[#384959]">
+            Create New Assessment
+          </h3>
+          <button
+            id="closeCreateAssessment"
+            class="text-[#6A89A7] hover:text-[#384959] text-3xl font-bold transition"
+          >
+            &times;
+          </button>
+        </div>
+        <form id="assessmentForm" class="space-y-6">
+          <div>
+            <label class="block text-sm font-bold text-[#384959] mb-3"
+              >Assessment Title</label
+            >
+            <input
+              type="text"
+              id="assessmentTitle"
+              required
+              class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-bold text-[#384959] mb-3"
+              >Upload Files</label
+            >
+            <input
+              type="file"
+              id="assessmentFiles"
+              multiple
+              required
+              class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 file:mr-4 file:py-2.5 file:px-6 file:rounded-xl file:border-0 file:bg-[#88BDF2]/10 file:text-[#384959] file:font-semibold hover:file:bg-[#88BDF2]/20 transition"
+            />
+          </div>
+          <button
+            type="submit"
+            class="w-full btn-primary text-white py-4 rounded-xl font-bold text-lg"
+          >
+            Create Assessment
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const apiBaseUrl = "http://api.interview.localhost"
+      let jwtToken = null
+      let currentSubmissionToken = null
+      let currentAssessmentId = null
+      let currentEditingFile = null
+
+      document.addEventListener("DOMContentLoaded", () => {
+        document
+          .getElementById("loginForm")
+          .addEventListener("submit", handleLogin)
+        document
+          .getElementById("sessionForm")
+          .addEventListener("submit", handleCreateSession)
+        document
+          .getElementById("assessmentForm")
+          .addEventListener("submit", handleCreateAssessment)
+        document
+          .getElementById("copyButton")
+          .addEventListener("click", handleCopyLink)
+        document
+          .getElementById("refreshSessionsBtn")
+          .addEventListener("click", loadSessions)
+        document
+          .getElementById("createAssessmentBtn")
+          .addEventListener("click", () => showModal("createAssessmentModal"))
+        document
+          .getElementById("closeSubmissionModal")
+          .addEventListener("click", () => hideModal("submissionModal"))
+        document
+          .getElementById("closeAssessmentEditor")
+          .addEventListener("click", () => hideModal("assessmentEditorModal"))
+        document
+          .getElementById("closeCreateAssessment")
+          .addEventListener("click", () => hideModal("createAssessmentModal"))
+        document
+          .getElementById("downloadSubmissionBtn")
+          .addEventListener("click", downloadSubmission)
+        document
+          .getElementById("reviewSubmissionBtn")
+          .addEventListener("click", reviewSubmission)
+        document
+          .getElementById("stopReviewBtn")
+          .addEventListener("click", stopReviewContainer)
+        document
+          .getElementById("addFileBtn")
+          .addEventListener("click", () =>
+            document.getElementById("newAssessmentFile").click()
+          )
+        document
+          .getElementById("newAssessmentFile")
+          .addEventListener("change", handleAddFile)
+        document
+          .getElementById("saveFileBtn")
+          .addEventListener("click", saveAssessmentFile)
+        document
+          .getElementById("deleteFileBtn")
+          .addEventListener("click", deleteAssessmentFile)
+        document
+          .getElementById("cancelEditBtn")
+          .addEventListener("click", cancelEdit)
+
+        document.querySelectorAll(".nav-item").forEach((item) => {
+          item.addEventListener("click", (e) => {
+            document.querySelectorAll(".nav-item").forEach((n) => {
+              n.classList.remove("active")
+              n.style.color = "#6A89A7"
+            })
+            e.currentTarget.classList.add("active")
+            e.currentTarget.style.color = "#384959"
+            const view = e.currentTarget.dataset.view
+            document
+              .querySelectorAll(".view-content")
+              .forEach((v) => v.classList.add("hidden"))
+            document.getElementById(`${view}View`).classList.remove("hidden")
+
+            if (view === "sessions") loadSessions()
+            if (view === "submissions") loadSubmissions()
+            if (view === "assessments") loadAssessments()
+            if (view === "create") loadAssessmentsForDropdown()
+          })
+        })
+
+        async function handleLogin(e) {
+          e.preventDefault()
+          try {
+            const res = await fetch(`${apiBaseUrl}/auth/login`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                username: document.getElementById("username").value,
+                password: document.getElementById("password").value,
+              }),
+            })
+            if (!res.ok) throw new Error("Invalid credentials")
+            const data = await res.json()
+            jwtToken = data.token
+            document.getElementById("loginView").classList.add("hidden")
+            document.getElementById("dashboardView").classList.remove("hidden")
+            loadSessions()
+            loadSubmissions()
+          } catch (error) {
+            document.getElementById("loginError").textContent = "Login failed"
+          }
+        }
+
+        async function handleCreateSession(e) {
+          e.preventDefault()
+          document.getElementById("linkContainer").classList.add("hidden")
+          try {
+            const res = await fetch(`${apiBaseUrl}/sessions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${jwtToken}`,
+              },
+              body: JSON.stringify({
+                candidateName: document.getElementById("candidateName").value,
+                position: document.getElementById("position").value,
+                assessmentId: document.getElementById("assessmentSelect").value,
+              }),
+            })
+            const data = await res.json()
+            document.getElementById("shareableLink").value = data.shareableLink
+            document.getElementById("linkContainer").classList.remove("hidden")
+            document.getElementById("sessionForm").reset()
+          } catch (error) {
+            alert("Session creation failed")
+          }
+        }
+
+        async function handleCreateAssessment(e) {
+          e.preventDefault()
+          const formData = new FormData()
+          formData.append(
+            "title",
+            document.getElementById("assessmentTitle").value
+          )
+          for (const file of document.getElementById("assessmentFiles").files) {
+            formData.append("assessmentFiles", file)
+          }
+          try {
+            await fetch(`${apiBaseUrl}/assessments`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${jwtToken}` },
+              body: formData,
+            })
+            document.getElementById("assessmentForm").reset()
+            hideModal("createAssessmentModal")
+            loadAssessments()
+          } catch (err) {
+            alert("Failed to save assessment")
+          }
+        }
+
+        async function loadSessions() {
+          try {
+            const res = await fetch(`${apiBaseUrl}/admin/sessions`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const sessions = await res.json()
+            const tbody = document.getElementById("sessionsTableBody")
+            tbody.innerHTML = ""
+
+            let activeCount = 0
+            sessions.forEach((session) => {
+              if (session.status === "ACTIVE") activeCount++
+              const row = document.createElement("tr")
+              row.className = "hover:bg-[#F8FAFB] transition"
+              row.innerHTML = `
+                <td class="py-5 px-6 font-semibold text-[#384959]">${
+                  session.candidate_name
+                }</td>
+                <td class="py-5 px-6 text-[#6A89A7]">${session.position}</td>
+                <td class="py-5 px-6 text-[#6A89A7]">${
+                  session.assessment_title || "N/A"
+                }</td>
+                <td class="py-5 px-6"><span class="badge badge-${getStatusBadge(
+                  session.status
+                )}">${session.status}</span></td>
+                <td class="py-5 px-6 text-[#6A89A7] text-sm">${new Date(
+                  session.created_at
+                ).toLocaleDateString()}</td>
+                <td class="py-5 px-6">
+                  <a href="http://api.interview.localhost/session/${
+                    session.token
+                  }" target="_blank" class="text-[#88BDF2] hover:text-[#6A89A7] font-semibold transition">Open →</a>
+                </td>
+              `
+              tbody.appendChild(row)
+            })
+            document.getElementById("activeSessionsCount").textContent =
+              activeCount
+          } catch (error) {
+            console.error("Failed to load sessions", error)
+          }
+        }
+
+        async function loadSubmissions() {
+          try {
+            const res = await fetch(`${apiBaseUrl}/admin/submissions`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const submissions = await res.json()
+            const grid = document.getElementById("submissionsGrid")
+            grid.innerHTML = ""
+            document.getElementById("submissionsCount").textContent =
+              submissions.length
+
+            submissions.forEach((sub) => {
+              const card = document.createElement("div")
+              card.className =
+                "card bg-white p-6 rounded-2xl border cursor-pointer"
+              card.onclick = () => viewSubmission(sub.token)
+              card.innerHTML = `
+                <div class="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 class="text-lg font-bold text-[#384959]">${
+                      sub.candidate_name
+                    }</h3>
+                    <p class="text-sm text-[#6A89A7] mt-1">${sub.position}</p>
+                  </div>
+                  <span class="badge badge-success">Completed</span>
+                </div>
+                <div class="space-y-2 text-sm text-[#6A89A7]">
+                  <p><span class="font-semibold">Assessment:</span> ${
+                    sub.assessment_title || "N/A"
+                  }</p>
+                  <p><span class="font-semibold">Submitted:</span> ${new Date(
+                    sub.completed_at
+                  ).toLocaleString()}</p>
+                </div>
+                <button class="mt-4 w-full py-2.5 bg-[#88BDF2]/10 text-[#384959] rounded-xl font-semibold hover:bg-[#88BDF2]/20 transition">View Submission →</button>
+              `
+              grid.appendChild(card)
+            })
+          } catch (error) {
+            console.error("Failed to load submissions", error)
+          }
+        }
+
+        async function loadAssessments() {
+          try {
+            const res = await fetch(`${apiBaseUrl}/assessments`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const assessments = await res.json()
+            const grid = document.getElementById("assessmentsGrid")
+            grid.innerHTML = ""
+
+            assessments.forEach((ass) => {
+              const card = document.createElement("div")
+              card.className = "card bg-white p-6 rounded-2xl border"
+              card.innerHTML = `
+                <h3 class="text-lg font-bold text-[#384959] mb-5">${ass.title}</h3>
+                <div class="flex gap-3">
+                  <button class="flex-1 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-semibold hover:bg-blue-100 transition" onclick="viewAssessmentFiles(${ass.id})">View Files</button>
+                  <button class="flex-1 py-2.5 bg-green-50 text-green-700 rounded-xl font-semibold hover:bg-green-100 transition" onclick="editAssessment(${ass.id}, '${ass.title}')">Edit</button>
+                </div>
+              `
+              grid.appendChild(card)
+            })
+          } catch (e) {
+            console.error("Failed to load assessments", e)
+          }
+        }
+
+        async function loadAssessmentsForDropdown() {
+          try {
+            const res = await fetch(`${apiBaseUrl}/assessments`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const assessments = await res.json()
+            const select = document.getElementById("assessmentSelect")
+            select.innerHTML =
+              '<option value="" disabled selected>Select an assessment...</option>'
+            assessments.forEach((ass) => {
+              select.innerHTML += `<option value="${ass.id}">${ass.title}</option>`
+            })
+          } catch (e) {
+            console.error("Failed to load assessments", e)
+          }
+        }
+
+        async function viewSubmission(token) {
+          currentSubmissionToken = token
+          try {
+            const [detailsRes, filesRes, statusRes] = await Promise.all([
+              fetch(`${apiBaseUrl}/admin/submissions/${token}/details`, {
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }),
+              fetch(`${apiBaseUrl}/admin/submissions/${token}/files`, {
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }),
+              fetch(`${apiBaseUrl}/admin/submissions/${token}/review/status`, {
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }),
+            ])
+
+            const details = await detailsRes.json()
+            const filesData = await filesRes.json()
+            const status = await statusRes.json()
+
+            document.getElementById(
+              "submissionModalTitle"
+            ).textContent = `${details.firstName} ${details.lastName}'s Submission`
+            document.getElementById("candidateDetails").innerHTML = `
+              <div class="space-y-2">
+                <p class="text-[#384959]"><span class="font-bold">Name:</span> ${details.firstName} ${details.lastName}</p>
+                <hr class="my-3 border-[#BDDDFC]/30">
+                <p class="font-bold text-[#384959]">Highest Education:</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">📚 ${details.highestEducation.course}</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">🏫 ${details.highestEducation.college}</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">📅 ${details.highestEducation.year}</p>
+                <hr class="my-3 border-[#BDDDFC]/30">
+                <p class="font-bold text-[#384959]">Second Highest:</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">📚 ${details.secondHighestEducation.course}</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">🏫 ${details.secondHighestEducation.college}</p>
+                <p class="text-xs ml-2 text-[#6A89A7]">📅 ${details.secondHighestEducation.year}</p>
+              </div>
+            `
+
+            if (status.running) {
+              document
+                .getElementById("stopReviewBtn")
+                .classList.remove("hidden")
+              document.getElementById("reviewSubmissionBtn").textContent =
+                "🖥️ Open Review (Running)"
+            } else {
+              document.getElementById("stopReviewBtn").classList.add("hidden")
+              document.getElementById("reviewSubmissionBtn").textContent =
+                "🖥️ Open in Code-Server"
+            }
+
+            const fileTree = document.getElementById("fileTree")
+            fileTree.innerHTML = ""
+            filesData.files
+              .filter((f) => !f.isDirectory)
+              .forEach((file) => {
+                const item = document.createElement("div")
+                item.className =
+                  "file-item px-4 py-3 rounded-xl text-sm cursor-pointer text-[#6A89A7]"
+                item.textContent = `📄 ${file.name}`
+                item.onclick = () => {
+                  document
+                    .querySelectorAll(".file-item")
+                    .forEach((f) => f.classList.remove("active"))
+                  item.classList.add("active")
+                  viewFile(token, file.name)
+                }
+                fileTree.appendChild(item)
+              })
+
+            showModal("submissionModal")
+          } catch (error) {
+            alert("Failed to load submission")
+          }
+        }
+
+        async function viewFile(token, filename) {
+          try {
+            const res = await fetch(
+              `${apiBaseUrl}/admin/submissions/${token}/file/${filename}`,
+              {
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+            const data = await res.json()
+
+            document.getElementById("fileViewer").innerHTML = `
+              <div class="text-left">
+                <div class="flex justify-between items-center mb-4 pb-4 border-b border-[#BDDDFC]/20">
+                  <h5 class="font-bold text-[#384959]">${data.filename}</h5>
+                </div>
+                <pre class="code-preview"><code class="language-${getLanguage(
+                  data.filename
+                )}">${escapeHtml(data.content)}</code></pre>
+              </div>
+            `
+            hljs.highlightAll()
+          } catch (error) {
+            alert("Failed to load file")
+          }
+        }
+
+        async function downloadSubmission() {
+          if (!currentSubmissionToken) return
+
+          const btn = document.getElementById("downloadSubmissionBtn")
+          const originalText = btn.innerHTML
+          btn.innerHTML = "⏳ Downloading..."
+          btn.disabled = true
+
+          try {
+            const response = await fetch(
+              `${apiBaseUrl}/admin/submissions/${currentSubmissionToken}/download`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+
+            if (!response.ok) throw new Error("Download failed")
+
+            const blob = await response.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `submission_${currentSubmissionToken}.zip`
+            document.body.appendChild(a)
+            a.click()
+            window.URL.revokeObjectURL(url)
+            document.body.removeChild(a)
+
+            btn.innerHTML = "✓ Downloaded!"
+            setTimeout(() => {
+              btn.innerHTML = originalText
+              btn.disabled = false
+            }, 2000)
+          } catch (error) {
+            console.error("Download error:", error)
+            btn.innerHTML = "✗ Download Failed"
+            setTimeout(() => {
+              btn.innerHTML = originalText
+              btn.disabled = false
+            }, 2000)
+          }
+        }
+
+        async function reviewSubmission() {
+          if (!currentSubmissionToken) return
+
+          const btn = document.getElementById("reviewSubmissionBtn")
+          const originalText = btn.innerHTML
+          btn.innerHTML = "⏳ Starting..."
+          btn.disabled = true
+
+          try {
+            const res = await fetch(
+              `${apiBaseUrl}/admin/submissions/${currentSubmissionToken}/review`,
+              {
+                method: "POST",
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+            const data = await res.json()
+
+            if (data.alreadyExists) {
+              window.open(data.reviewUrl, "_blank")
+              btn.innerHTML = originalText
+              btn.disabled = false
+            } else {
+              btn.innerHTML = "🚀 Provisioning..."
+
+              const loadingWindow = window.open("about:blank", "_blank")
+              loadingWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <title>Loading Review Environment</title>
+                  <meta http-equiv="refresh" content="10;url=${data.reviewUrl}">
+                  <style>
+                    body {
+                      font-family: 'Inter', sans-serif;
+                      background: linear-gradient(135deg, #6A89A7 0%, #88BDF2 100%);
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      height: 100vh;
+                      margin: 0;
+                    }
+                    .container {
+                      background: white;
+                      padding: 60px;
+                      border-radius: 24px;
+                      text-align: center;
+                      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                      max-width: 500px;
+                    }
+                    .loader {
+                      border: 8px solid #f3f3f3;
+                      border-top: 8px solid #88BDF2;
+                      border-radius: 50%;
+                      width: 60px;
+                      height: 60px;
+                      animation: spin 1s linear infinite;
+                      margin: 0 auto 30px;
+                    }
+                    @keyframes spin {
+                      0% { transform: rotate(0deg); }
+                      100% { transform: rotate(360deg); }
+                    }
+                    h1 { color: #384959; font-size: 24px; margin-bottom: 10px; font-weight: 600; }
+                    p { color: #6A89A7; margin: 10px 0; }
+                    .manual-link {
+                      margin-top: 30px;
+                      padding-top: 20px;
+                      border-top: 2px solid #f3f3f3;
+                    }
+                    .manual-link a {
+                      color: #88BDF2;
+                      text-decoration: none;
+                      font-weight: 600;
+                    }
+                    .manual-link a:hover {
+                      color: #6A89A7;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <div class="loader"></div>
+                    <h1>🚀 Preparing Your Review Environment</h1>
+                    <p>Setting up code-server with the submission...</p>
+                    <p style="font-size: 14px; margin-top: 20px;">This page will redirect in <span id="countdown">5</span> seconds</p>
+                    <div class="manual-link">
+                      <p style="font-size: 12px; color: #6A89A7;">If the page doesn't redirect automatically:</p>
+                      <a href="${data.reviewUrl}" target="_blank">Click here to open manually</a>
+                    </div>
+                  </div>
+                  <script>
+                    let seconds = 5;
+                    const countdown = document.getElementById('countdown');
+                    const interval = setInterval(() => {
+                      seconds--;
+                      countdown.textContent = seconds;
+                      if (seconds <= 0) {
+                        clearInterval(interval);
+                        window.location.href = "${data.reviewUrl}";
+                      }
+                    }, 1000);
+                  <\/script>
+                </body>
+                </html>
+              `)
+
+              setTimeout(() => {
+                btn.innerHTML = "🖥️ Open Review (Running)"
+                btn.disabled = false
+                document
+                  .getElementById("stopReviewBtn")
+                  .classList.remove("hidden")
+              }, 5000)
+            }
+          } catch (error) {
+            console.error("Review error:", error)
+            btn.innerHTML = "✗ Failed to start"
+            setTimeout(() => {
+              btn.innerHTML = originalText
+              btn.disabled = false
+            }, 2000)
+          }
+        }
+
+        async function stopReviewContainer() {
+          if (!currentSubmissionToken) return
+          if (!confirm("Are you sure you want to stop the review environment?"))
+            return
+
+          const btn = document.getElementById("stopReviewBtn")
+          const originalText = btn.innerHTML
+          btn.innerHTML = "⏳ Stopping..."
+          btn.disabled = true
+
+          try {
+            await fetch(
+              `${apiBaseUrl}/admin/submissions/${currentSubmissionToken}/review`,
+              {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+
+            btn.classList.add("hidden")
+            document.getElementById("reviewSubmissionBtn").textContent =
+              "🖥️ Open in Code-Server"
+
+            setTimeout(() => {
+              btn.innerHTML = originalText
+              btn.disabled = false
+            }, 1000)
+          } catch (error) {
+            console.error("Stop error:", error)
+            btn.innerHTML = "✗ Failed to stop"
+            setTimeout(() => {
+              btn.innerHTML = originalText
+              btn.disabled = false
+            }, 2000)
+          }
+        }
+
+        window.viewAssessmentFiles = async (id) => {
+          try {
+            const res = await fetch(`${apiBaseUrl}/assessments/${id}`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const data = await res.json()
+            alert(`Files:\n${data.files.join("\n")}`)
+          } catch (err) {
+            alert("Failed to load files")
+          }
+        }
+
+        window.editAssessment = async (id, title) => {
+          currentAssessmentId = id
+          document.getElementById(
+            "assessmentEditorTitle"
+          ).textContent = `Edit: ${title}`
+
+          try {
+            const res = await fetch(`${apiBaseUrl}/assessments/${id}`, {
+              headers: { Authorization: `Bearer ${jwtToken}` },
+            })
+            const data = await res.json()
+
+            const fileTree = document.getElementById("assessmentFileTree")
+            fileTree.innerHTML = ""
+            data.files.forEach((filename) => {
+              const item = document.createElement("div")
+              item.className =
+                "file-item px-4 py-3 rounded-xl text-sm cursor-pointer text-[#6A89A7]"
+              item.textContent = `📄 ${filename}`
+              item.onclick = () => {
+                document
+                  .querySelectorAll("#assessmentFileTree .file-item")
+                  .forEach((f) => f.classList.remove("active"))
+                item.classList.add("active")
+                editAssessmentFile(id, filename)
+              }
+              fileTree.appendChild(item)
+            })
+
+            showModal("assessmentEditorModal")
+          } catch (error) {
+            alert("Failed to load assessment")
+          }
+        }
+
+        async function editAssessmentFile(id, filename) {
+          currentEditingFile = filename
+          try {
+            const res = await fetch(
+              `${apiBaseUrl}/assessments/${id}/file/${filename}`,
+              {
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+            const data = await res.json()
+
+            document.getElementById("assessmentFileEditor").innerHTML = `
+              <div class="bg-white rounded-2xl border border-[#BDDDFC]/30 p-6">
+                <h5 class="font-bold text-[#384959] mb-4">${data.filename}</h5>
+                <textarea id="fileContentEditor" class="code-editor w-full h-96 p-5 border-2 border-[#BDDDFC]/30 rounded-xl focus:border-[#88BDF2] transition-all">${data.content}</textarea>
+              </div>
+            `
+            document.getElementById("editorActions").classList.remove("hidden")
+          } catch (error) {
+            alert("Failed to load file")
+          }
+        }
+
+        async function saveAssessmentFile() {
+          if (!currentAssessmentId || !currentEditingFile) return
+          const content = document.getElementById("fileContentEditor").value
+
+          try {
+            await fetch(
+              `${apiBaseUrl}/assessments/${currentAssessmentId}/file/${currentEditingFile}`,
+              {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${jwtToken}`,
+                },
+                body: JSON.stringify({ content }),
+              }
+            )
+            alert("File saved!")
+          } catch (error) {
+            alert("Failed to save file")
+          }
+        }
+
+        async function deleteAssessmentFile() {
+          if (!currentAssessmentId || !currentEditingFile) return
+          if (!confirm(`Delete ${currentEditingFile}?`)) return
+
+          try {
+            await fetch(
+              `${apiBaseUrl}/assessments/${currentAssessmentId}/file/${currentEditingFile}`,
+              {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${jwtToken}` },
+              }
+            )
+            alert("File deleted!")
+            const title = document
+              .getElementById("assessmentEditorTitle")
+              .textContent.replace("Edit: ", "")
+            editAssessment(currentAssessmentId, title)
+          } catch (error) {
+            alert("Failed to delete file")
+          }
+        }
+
+        async function handleAddFile(e) {
+          if (!currentAssessmentId || !e.target.files.length) return
+          const formData = new FormData()
+          formData.append("file", e.target.files[0])
+
+          try {
+            await fetch(
+              `${apiBaseUrl}/assessments/${currentAssessmentId}/file`,
+              {
+                method: "POST",
+                headers: { Authorization: `Bearer ${jwtToken}` },
+                body: formData,
+              }
+            )
+            alert("File added!")
+            const title = document
+              .getElementById("assessmentEditorTitle")
+              .textContent.replace("Edit: ", "")
+            editAssessment(currentAssessmentId, title)
+          } catch (error) {
+            alert("Failed to add file")
+          }
+        }
+
+        function handleCopyLink() {
+          const input = document.getElementById("shareableLink")
+          input.select()
+          document.execCommand("copy")
+          document.getElementById("copyFeedback").textContent = "✓ Copied!"
+          setTimeout(() => {
+            document.getElementById("copyFeedback").textContent = ""
+          }, 2000)
+        }
+
+        function showModal(id) {
+          document.getElementById(id).classList.remove("hidden")
+        }
+
+        function hideModal(id) {
+          document.getElementById(id).classList.add("hidden")
+        }
+
+        function getStatusBadge(status) {
+          const map = {
+            COMPLETED: "success",
+            ACTIVE: "info",
+            PROVISIONING: "warning",
+            FAILED: "danger",
+            CREATED: "info",
+          }
+          return map[status] || "info"
+        }
+
+        function getLanguage(filename) {
+          const ext = filename.split(".").pop()
+          const map = {
+            py: "python",
+            js: "javascript",
+            java: "java",
+            html: "html",
+            css: "css",
+            md: "markdown",
+          }
+          return map[ext] || "plaintext"
+        }
+
+        function escapeHtml(text) {
+          const div = document.createElement("div")
+          div.textContent = text
+          return div.innerHTML
+        }
+
+        function cancelEdit() {
+          document.getElementById("assessmentFileEditor").innerHTML =
+            '<p class="text-[#6A89A7] text-center py-16">Select a file to edit</p>'
+          document.getElementById("editorActions").classList.add("hidden")
+        }
+      })
+    </script>
+  </body>
+</html>

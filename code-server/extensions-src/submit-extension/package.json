@@ -1,0 +1,51 @@
+{
+  "name": "submit-extension",
+  "displayName": "Submit Assignment",
+  "description": "A simple extension to submit coding assignments.",
+  "version": "0.0.1",
+  "publisher": "adarshraveendran",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "interview.submitAssignment",
+        "title": "Submit Assignment",
+        "icon": {
+          "light": "./icons/submit-light.svg",
+          "dark": "./icons/submit-dark.svg"
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "true",
+          "command": "interview.submitAssignment",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.config.js",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "form-data": "^4.0.0",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.5"
+  }
+}

@@ -8,6 +8,7 @@ const path = require("path")
 const cors = require("cors")
 const jwt = require("jsonwebtoken")
 const { execSync } = require("child_process")
+const { generateAssessment } = require("./groqService")
 
 const app = express()
 const port = 3000
@@ -32,10 +33,10 @@ const submissionUpload = multer({ storage: multer.memoryStorage() })
 
 const pool = new Pool({
   user: "user",
-  host: "database",
+  host: process.env.DB_HOST || "database",
   database: "interviewdb",
   password: "password",
-  port: 5432,
+  port: process.env.DB_PORT || 5432,
 })
 
 // Track provisioning sessions to prevent race conditions
@@ -47,14 +48,44 @@ async function initializeDatabase() {
     try {
       const client = await pool.connect()
       console.log("Database connection successful.")
+
+      // Users Table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'INTERVIEWER', 'CANDIDATE')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+
+      // Assessments Table
       await client.query(`
         CREATE TABLE IF NOT EXISTS assessments (
           id SERIAL PRIMARY KEY,
           title TEXT NOT NULL,
+          job_description TEXT,
+          created_by INTEGER REFERENCES users(id),
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
       `)
-      console.log('Database table "assessments" is ready.')
+
+      // Questions Table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS questions (
+          id SERIAL PRIMARY KEY,
+          assessment_id INTEGER REFERENCES assessments(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK (type IN ('MCQ', 'FILL_IN_THE_BLANKS', 'CODING')),
+          question_text TEXT NOT NULL,
+          options JSONB, -- For MCQ
+          correct_answer TEXT, -- For MCQ and Fill in the blanks
+          points INTEGER DEFAULT 1,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+
+      // Sessions Table (Updated)
       await client.query(`
         CREATE TABLE IF NOT EXISTS sessions (
           id SERIAL PRIMARY KEY,
@@ -63,12 +94,36 @@ async function initializeDatabase() {
           candidate_name TEXT,
           position TEXT,
           assessment_id INTEGER REFERENCES assessments(id),
+          created_by INTEGER REFERENCES users(id),
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           active_at TIMESTAMP WITH TIME ZONE,
-          completed_at TIMESTAMP WITH TIME ZONE
+          completed_at TIMESTAMP WITH TIME ZONE,
+          score INTEGER
         );
       `)
-      console.log('Database table "sessions" is ready.')
+
+      // Candidate Responses Table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS candidate_responses (
+          id SERIAL PRIMARY KEY,
+          session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+          question_id INTEGER REFERENCES questions(id),
+          response TEXT,
+          is_correct BOOLEAN,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+
+      console.log('Database tables are ready.')
+
+      // Seed Admin User
+      const adminCheck = await client.query("SELECT * FROM users WHERE username = 'admin'")
+      if (adminCheck.rows.length === 0) {
+        // In a real app, hash this password!
+        await client.query("INSERT INTO users (username, password, role) VALUES ($1, $2, $3)", ['admin', 'password', 'ADMIN'])
+        console.log("Default admin user created.")
+      }
+
       fs.mkdirSync(path.join(__dirname, "submissions"), { recursive: true })
       fs.mkdirSync(path.join(__dirname, "assessment_files"), {
         recursive: true,
@@ -169,13 +224,57 @@ const authenticateJWT = (req, res, next) => {
   }
 }
 
-app.post("/auth/login", (req, res) => {
-  const { username, password } = req.body
-  if (username === adminUser.username && password === adminUser.password) {
-    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "8h" })
-    res.json({ token })
+// Middleware to check for Admin role
+const requireAdmin = (req, res, next) => {
+  if (req.user && req.user.role === 'ADMIN') {
+    next();
   } else {
-    res.status(401).send("Invalid credentials")
+    res.status(403).json({ message: "Admin access required" });
+  }
+}
+
+app.post("/auth/login", async (req, res) => {
+  const { username, password } = req.body
+  try {
+    const result = await pool.query("SELECT * FROM users WHERE username = $1", [username])
+    const user = result.rows[0]
+
+    if (user && user.password === password) { // In production, use bcrypt!
+      const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "8h" })
+      res.json({ token, role: user.role })
+    } else {
+      res.status(401).send("Invalid credentials")
+    }
+  } catch (error) {
+    console.error("Login error:", error)
+    res.status(500).send("Internal server error")
+  }
+})
+
+app.post("/auth/register", authenticateJWT, requireAdmin, async (req, res) => {
+  const { username, password, role } = req.body
+  if (!['INTERVIEWER', 'CANDIDATE'].includes(role)) {
+    return res.status(400).json({ message: "Invalid role" })
+  }
+  try {
+    await pool.query(
+      "INSERT INTO users (username, password, role) VALUES ($1, $2, $3)",
+      [username, password, role]
+    )
+    res.status(201).json({ message: "User created successfully" })
+  } catch (error) {
+    console.error("Registration error:", error)
+    res.status(500).json({ message: "Failed to create user" })
+  }
+})
+
+app.get("/users", authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
+    res.json(result.rows)
+  } catch (error) {
+    console.error("Fetch users error:", error)
+    res.status(500).json({ message: "Failed to fetch users" })
   }
 })
 
@@ -216,6 +315,86 @@ app.get("/admin/sessions", authenticateJWT, async (req, res) => {
   }
 })
 
+app.post("/assessments/generate", authenticateJWT, async (req, res) => {
+  const { jobDescription } = req.body;
+  if (!jobDescription) {
+    return res.status(400).json({ message: "Job description is required" });
+  }
+  try {
+    const assessmentData = await generateAssessment(jobDescription);
+    res.json(assessmentData);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to generate assessment" });
+  }
+});
+
+app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
+  const { title, jobDescription, questions, codingChallenge } = req.body;
+
+  console.log("Received AI assessment save request:", { title, questionCount: questions?.length, hasCodingChallenge: !!codingChallenge });
+
+  if (!title || !questions || !codingChallenge) {
+    console.error("Missing required fields:", { title: !!title, questions: !!questions, codingChallenge: !!codingChallenge });
+    return res.status(400).json({ message: "Missing required fields" });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    // 1. Create Assessment
+    const result = await client.query(
+      "INSERT INTO assessments (title, job_description, created_by) VALUES ($1, $2, $3) RETURNING id",
+      [title, jobDescription, req.user.id]
+    );
+    const assessmentId = result.rows[0].id;
+    console.log("Created assessment with ID:", assessmentId);
+
+    // 2. Save Questions
+    for (const q of questions) {
+      const optionsJson = q.options ? JSON.stringify(q.options) : null;
+      await client.query(
+        "INSERT INTO questions (assessment_id, type, question_text, options, correct_answer) VALUES ($1, $2, $3, $4, $5)",
+        [assessmentId, q.type, q.question_text, optionsJson, q.correct_answer]
+      );
+    }
+    console.log("Saved", questions.length, "questions");
+
+    // 3. Save Coding Challenge as Files
+    const assessmentPath = path.join(__dirname, "assessment_files", String(assessmentId));
+    fs.mkdirSync(assessmentPath, { recursive: true });
+
+    // Save solution/template file
+    fs.writeFileSync(path.join(assessmentPath, codingChallenge.filename), codingChallenge.template_code);
+
+    // Save instructions/readme
+    fs.writeFileSync(path.join(assessmentPath, "README.md"), `# ${codingChallenge.title}\n\n${codingChallenge.description}`);
+
+    // Save test cases
+    fs.writeFileSync(path.join(assessmentPath, "tests.json"), JSON.stringify(codingChallenge.test_cases, null, 2));
+
+    // Also add a question record for the coding challenge
+    await client.query(
+      "INSERT INTO questions (assessment_id, type, question_text, points) VALUES ($1, 'CODING', $2, 10)",
+      [assessmentId, codingChallenge.description]
+    );
+    console.log("Saved coding challenge files");
+
+    await client.query("COMMIT");
+    console.log("Assessment saved successfully");
+    res.status(201).json({ message: "Assessment created successfully", id: assessmentId });
+  } catch (error) {
+    if (client) await client.query("ROLLBACK");
+    console.error("Failed to create AI assessment:");
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    res.status(500).json({ message: "Failed to create assessment", error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 app.post(
   "/assessments",
   authenticateJWT,
@@ -229,8 +408,8 @@ app.post(
     try {
       client = await pool.connect()
       const result = await client.query(
-        "INSERT INTO assessments (title) VALUES ($1) RETURNING id",
-        [title]
+        "INSERT INTO assessments (title, created_by) VALUES ($1, $2) RETURNING id",
+        [title, req.user.id]
       )
       const newId = result.rows[0].id
       const newAssessmentPath = path.join(
@@ -272,21 +451,126 @@ app.get("/assessments", authenticateJWT, async (req, res) => {
 app.get("/assessments/:id", authenticateJWT, async (req, res) => {
   try {
     const assessmentId = req.params.id
-    const assessmentDir = path.join(__dirname, "assessment_files", assessmentId)
-    if (!fs.existsSync(assessmentDir)) {
+
+    // Fetch assessment details
+    const assessmentResult = await pool.query("SELECT * FROM assessments WHERE id = $1", [assessmentId])
+    if (assessmentResult.rows.length === 0) {
       return res.status(404).json({ message: "Assessment not found" })
     }
-    const files = fs.readdirSync(assessmentDir)
-    res.json({ files })
+    const assessment = assessmentResult.rows[0]
+
+    // Fetch questions
+    const questionsResult = await pool.query("SELECT * FROM questions WHERE assessment_id = $1 ORDER BY id ASC", [assessmentId])
+
+    // Fetch files
+    const assessmentDir = path.join(__dirname, "assessment_files", assessmentId)
+    let files = []
+    if (fs.existsSync(assessmentDir)) {
+      files = fs.readdirSync(assessmentDir)
+    }
+
+    res.json({ ...assessment, questions: questionsResult.rows, files })
   } catch (e) {
     console.error("Failed to fetch assessment details:", e)
     res.status(500).send("Failed to fetch assessment details")
   }
 })
 
-app.get("/session/:token", async (req, res) => {
-  const { token } = req.params
+app.delete("/assessments/:id", authenticateJWT, async (req, res) => {
+  const client = await pool.connect()
+  try {
+    await client.query("BEGIN")
+    const assessmentId = req.params.id
 
+    // Check if assessment exists
+    const check = await client.query("SELECT id FROM assessments WHERE id = $1", [assessmentId])
+    if (check.rows.length === 0) {
+      await client.query("ROLLBACK")
+      return res.status(404).json({ message: "Assessment not found" })
+    }
+
+    // Delete questions
+    await client.query("DELETE FROM questions WHERE assessment_id = $1", [assessmentId])
+
+    // Delete sessions (optional, but good for cleanup)
+    await client.query("DELETE FROM sessions WHERE assessment_id = $1", [assessmentId])
+
+    // Delete assessment
+    await client.query("DELETE FROM assessments WHERE id = $1", [assessmentId])
+
+    // Delete files
+    const assessmentDir = path.join(__dirname, "assessment_files", assessmentId)
+    if (fs.existsSync(assessmentDir)) {
+      fs.rmSync(assessmentDir, { recursive: true, force: true })
+    }
+
+    await client.query("COMMIT")
+    res.json({ message: "Assessment deleted successfully" })
+  } catch (e) {
+    await client.query("ROLLBACK")
+    console.error("Failed to delete assessment:", e)
+    res.status(500).send("Failed to delete assessment")
+  } finally {
+    client.release()
+  }
+})
+
+app.get("/session/:token/questions", async (req, res) => {
+  const { token } = req.params
+  try {
+    const sessionResult = await pool.query("SELECT assessment_id FROM sessions WHERE token = $1", [token])
+    if (sessionResult.rows.length === 0) return res.status(404).send("Session not found")
+
+    const assessmentId = sessionResult.rows[0].assessment_id
+    const questionsResult = await pool.query(
+      "SELECT id, type, question_text, options, points FROM questions WHERE assessment_id = $1 AND type != 'CODING' ORDER BY id ASC",
+      [assessmentId]
+    )
+    res.json(questionsResult.rows)
+  } catch (error) {
+    console.error("Error fetching questions:", error)
+    res.status(500).send("Error fetching questions")
+  }
+})
+
+app.post("/session/:token/answers", async (req, res) => {
+  const { token } = req.params
+  const { answers } = req.body // [{ questionId, response }]
+
+  try {
+    const sessionResult = await pool.query("SELECT id FROM sessions WHERE token = $1", [token])
+    if (sessionResult.rows.length === 0) return res.status(404).send("Session not found")
+    const sessionId = sessionResult.rows[0].id
+
+    let score = 0
+
+    for (const ans of answers) {
+      // Check correctness
+      const qResult = await pool.query("SELECT correct_answer, points FROM questions WHERE id = $1", [ans.questionId])
+      if (qResult.rows.length > 0) {
+        const question = qResult.rows[0]
+        const isCorrect = question.correct_answer === ans.response
+        if (isCorrect) score += question.points
+
+        await pool.query(
+          "INSERT INTO candidate_responses (session_id, question_id, response, is_correct) VALUES ($1, $2, $3, $4)",
+          [sessionId, ans.questionId, ans.response, isCorrect]
+        )
+      }
+    }
+
+    // Update session score (partial)
+    await pool.query("UPDATE sessions SET score = $1 WHERE id = $2", [score, sessionId])
+
+    res.json({ message: "Answers submitted successfully" })
+  } catch (error) {
+    console.error("Error submitting answers:", error)
+    res.status(500).send("Error submitting answers")
+  }
+})
+
+app.post("/session/:token/start-coding", async (req, res) => {
+  const { token } = req.params
   try {
     const result = await pool.query(
       "SELECT status, assessment_id FROM sessions WHERE token = $1",
@@ -299,66 +583,51 @@ app.get("/session/:token", async (req, res) => {
 
     const session = result.rows[0]
 
-    const loadingPage = `
-      <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="5"><title>Preparing Environment</title><style>body{font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f4f4f9;} .container {text-align: center; padding: 40px; border-radius: 8px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);} h1 {color: #333;} .loader {border: 8px solid #f3f3f3; border-top: 8px solid #3498db; border-radius: 50%; width: 60px; height: 60px; animation: spin 2s linear infinite; margin: 20px auto;} @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style></head>
-      <body><div class="container"><h1>Your coding environment is being prepared.</h1><p>This page will automatically refresh in a moment.</p><div class="loader"></div></div></body></html>
-    `
-
-    if (session.status === "COMPLETED") {
-      return res.send("<h1>This interview session has been completed.</h1>")
-    }
-
     if (session.status === "ACTIVE") {
-      return res.redirect(302, `http://${token}.interview.localhost`)
+      return res.json({ url: `http://${token}.interview.localhost` })
     }
 
     if (session.status === "PROVISIONING") {
-      return res.send(loadingPage)
+      return res.json({ status: "PROVISIONING" })
     }
 
     if (session.status === "CREATED" || session.status === "FAILED") {
-      // Check for race condition
       if (provisioningLocks.has(token)) {
-        return res.send(loadingPage)
+        return res.json({ status: "PROVISIONING" })
       }
 
-      // Set lock
       provisioningLocks.set(token, true)
+      await pool.query("UPDATE sessions SET status = 'PROVISIONING' WHERE token = $1", [token])
 
-      // Update status to PROVISIONING
-      await pool.query(
-        "UPDATE sessions SET status = 'PROVISIONING' WHERE token = $1",
-        [token]
-      )
-
-      res.send(loadingPage)
-
-      // Provision container asynchronously
+      // Start provisioning in background
       provisionInterviewContainer(token, session.assessment_id)
         .then(async () => {
-          await pool.query(
-            "UPDATE sessions SET status = 'ACTIVE', active_at = NOW() WHERE token = $1",
-            [token]
-          )
+          await pool.query("UPDATE sessions SET status = 'ACTIVE', active_at = NOW() WHERE token = $1", [token])
           provisioningLocks.delete(token)
-          console.log(`Session ${token} is now ACTIVE`)
         })
         .catch(async (err) => {
-          console.error(`Provisioning failed for ${token}:`, err)
-          await pool.query(
-            "UPDATE sessions SET status = 'FAILED' WHERE token = $1",
-            [token]
-          )
+          await pool.query("UPDATE sessions SET status = 'FAILED' WHERE token = $1", [token])
           provisioningLocks.delete(token)
         })
-    } else {
-      return res.status(400).send(`Session in invalid state: ${session.status}`)
+
+      return res.json({ status: "PROVISIONING" })
     }
   } catch (error) {
-    console.error("Error in session endpoint:", error)
-    if (!res.headersSent) {
-      res.status(500).send("Server error.")
-    }
+    console.error("Error starting coding session:", error)
+    res.status(500).send("Server error")
+  }
+})
+
+app.get("/session/:token", async (req, res) => {
+  const { token } = req.params
+  // Serve the candidate frontend
+  // For now, we'll assume the frontend file is at public/candidate/index.html
+  // We need to ensure express serves static files or we read it here.
+  const candidateHtmlPath = path.join(__dirname, "public", "candidate", "index.html")
+  if (fs.existsSync(candidateHtmlPath)) {
+    res.sendFile(candidateHtmlPath)
+  } else {
+    res.send("Candidate interface not found. Please contact admin.")
   }
 })
 
@@ -390,20 +659,20 @@ app.post(
 
       res.status(200).json({ message: "Submission successful!" })
 
-      // Stop container asynchronously
-      ;(async () => {
-        const container = docker.getContainer(`session-${token}`)
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-          console.log(`Stopping container for session ${token}...`)
-          await container.stop()
-          console.log(`Container stopped for session ${token}`)
-        } catch (error) {
-          console.log(
-            `Container for session ${token} was already stopped or removed.`
-          )
-        }
-      })()
+        // Stop container asynchronously
+        ; (async () => {
+          const container = docker.getContainer(`session-${token}`)
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+            console.log(`Stopping container for session ${token}...`)
+            await container.stop()
+            console.log(`Container stopped for session ${token}`)
+          } catch (error) {
+            console.log(
+              `Container for session ${token} was already stopped or removed.`
+            )
+          }
+        })()
     } catch (error) {
       console.error("Submission failed for session " + token, error)
       if (!res.headersSent) {

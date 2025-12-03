@@ -154,6 +154,31 @@ async function initializeDatabase() {
         END $$;
       `)
 
+      // AI Provider Configuration Table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ai_config (
+          id SERIAL PRIMARY KEY,
+          provider VARCHAR(50) NOT NULL UNIQUE,
+          api_key TEXT,
+          model VARCHAR(100),
+          is_active BOOLEAN DEFAULT FALSE,
+          config JSONB,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+
+      // Insert default providers if not exist
+      await client.query(`
+        INSERT INTO ai_config (provider, model, is_active, config)
+        VALUES 
+          ('groq', 'llama-3.3-70b-versatile', TRUE, '{"temperature": 0.7, "max_tokens": 4000}'),
+          ('openai', 'gpt-4-turbo-preview', FALSE, '{"temperature": 0.7, "max_tokens": 4000}'),
+          ('claude', 'claude-3-sonnet-20240229', FALSE, '{"temperature": 0.7, "max_tokens": 4000}'),
+          ('gemini', 'gemini-pro', FALSE, '{"temperature": 0.7, "max_tokens": 4000}')
+        ON CONFLICT (provider) DO NOTHING;
+      `)
+
       console.log('Database tables are ready.')
 
       // Seed Admin User
@@ -487,6 +512,92 @@ app.get("/admin/sessions/:token/questions", authenticateJWT, async (req, res) =>
   } catch (error) {
     console.error("Error fetching session questions:", error);
     res.status(500).send("Error fetching questions");
+  }
+});
+
+// ========== AI Provider Management ==========
+
+// GET /admin/ai-providers - List all AI providers
+app.get("/admin/ai-providers", authenticateJWT, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, provider, model, is_active, config, created_at, updated_at FROM ai_config ORDER BY provider ASC"
+    );
+    // Don't send API keys to frontend
+    res.json(result.rows.map(row => ({
+      ...row,
+      has_api_key: !!row.api_key
+    })));
+  } catch (error) {
+    console.error("Error fetching AI providers:", error);
+    res.status(500).send("Error fetching providers");
+  }
+});
+
+// PUT /admin/ai-providers/:provider - Update provider config
+app.put("/admin/ai-providers/:provider", authenticateJWT, async (req, res) => {
+  const { provider } = req.params;
+  const { api_key, model, config } = req.body;
+
+  try {
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (api_key !== undefined) {
+      updates.push(`api_key = $${paramCount++}`);
+      values.push(api_key);
+    }
+    if (model) {
+      updates.push(`model = $${paramCount++}`);
+      values.push(model);
+    }
+    if (config) {
+      updates.push(`config = $${paramCount++}`);
+      values.push(JSON.stringify(config));
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(provider);
+
+    await pool.query(
+      `UPDATE ai_config SET ${updates.join(', ')} WHERE provider = $${paramCount}`,
+      values
+    );
+
+    res.json({ message: "Provider updated successfully" });
+  } catch (error) {
+    console.error("Error updating provider:", error);
+    res.status(500).send("Error updating provider");
+  }
+});
+
+// PUT /admin/ai-providers/:provider/activate - Set active provider
+app.put("/admin/ai-providers/:provider/activate", authenticateJWT, async (req, res) => {
+  const { provider } = req.params;
+
+  try {
+    // Deactivate all providers first
+    await pool.query("UPDATE ai_config SET is_active = FALSE");
+
+    // Activate the selected one
+    const result = await pool.query(
+      "UPDATE ai_config SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE provider = $1 RETURNING *",
+      [provider]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Provider not found" });
+    }
+
+    // Reinitialize AI service with new provider
+    const { initializeAIService } = require("./groqService");
+    initializeAIService(pool);
+
+    res.json({ message: `${provider} is now the active provider`, provider: result.rows[0] });
+  } catch (error) {
+    console.error("Error activating provider:", error);
+    res.status(500).send("Error activating provider");
   }
 });
 
@@ -1342,5 +1453,9 @@ app.post(
 
 app.listen(port, () => {
   console.log(`Backend service listening on port ${port}`)
-  initializeDatabase()
+  initializeDatabase().then(() => {
+    // Initialize multi-provider AI service
+    const { initializeAIService } = require("./groqService");
+    initializeAIService(pool);
+  });
 })

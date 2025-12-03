@@ -11,10 +11,11 @@ services:
       - /app/node_modules
       # Mount host /tmp so session files can be accessed by dynamically created containers
       - /tmp/interview-sessions:/tmp/interview-sessions
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgres://user:password@database:5432/interviewdb
       - NODE_ENV=development
-      - GROQ_API_KEY=${GROQ_API_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`api.interview.localhost`)"

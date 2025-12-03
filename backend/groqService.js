@@ -197,4 +197,28 @@ CRITICAL: Provide EXACTLY ${counts.testCases} test cases, no more, no less.
     }
 }
 
-module.exports = { generateAssessment, generateSessionQuestions };
+// Multi-Provider AI Service Integration
+const AIService = require("./aiService");
+let aiService = null;
+
+function initializeAIService(pool) {
+    aiService = new AIService(pool);
+    console.log("AIService initialized with multi-provider support");
+}
+
+// Use multi-provider service if available, fallback to Groq
+async function generateWithAI(prompt) {
+    if (aiService) {
+        return await aiService.generateCompletion(prompt);
+    }
+    // Fallback to direct Groq
+    const completion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.7,
+        response_format: { type: "json_object" },
+    });
+    return JSON.parse(completion.choices[0].message.content);
+}
+
+module.exports = { generateAssessment, generateSessionQuestions, initializeAIService, generateWithAI };

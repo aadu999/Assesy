@@ -460,12 +460,52 @@
               <h2 class="text-3xl font-bold text-[#384959] mb-8">
                 Create Interview Session
               </h2>
-              <form id="sessionForm" class="space-y-6">
-                <div>
-                  <label class="block text-sm font-bold text-[#384959] mb-3">Assessment</label>
-                  <select id="assessmentSelect" required
-                    class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"></select>
+
+              <!-- Mode Selector -->
+              <div class="mb-6">
+                <label class="block text-sm font-bold text-[#384959] mb-3">Session Mode</label>
+                <div class="grid grid-cols-2 gap-4">
+                  <button type="button" id="templateModeBtn"
+                    class="mode-btn active px-6 py-4 rounded-xl border-2 border-primary bg-primary/10 text-primary font-semibold transition">
+                    📋 Use Existing Assessment
+                  </button>
+                  <button type="button" id="aiModeBtn"
+                    class="mode-btn px-6 py-4 rounded-xl border-2 border-gray-200 bg-white text-gray-600 font-semibold transition hover:border-primary hover:text-primary">
+                    ✨ Generate with AI
+                  </button>
                 </div>
+              </div>
+
+              <form id="sessionForm" class="space-y-6">
+                <!-- Template Mode Fields -->
+                <div id="templateFields">
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3">Assessment</label>
+                    <select id="assessmentSelect" required
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"></select>
+                  </div>
+                </div>
+
+                <!-- AI Mode Fields -->
+                <div id="aiFields" class="hidden space-y-4">
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3">Job Description</label>
+                    <textarea id="jobDescription" rows="4"
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all"
+                      placeholder="e.g., Senior Full Stack Developer with 5+ years experience in React, Node.js, and AWS..."></textarea>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-bold text-[#384959] mb-3">Difficulty Level</label>
+                    <select id="complexitySelect"
+                      class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all">
+                      <option value="Easy">🟢 Easy - Junior Level (5 test cases)</option>
+                      <option value="Medium" selected>🟡 Medium - Mid Level (7 test cases)</option>
+                      <option value="Hard">🔴 Hard - Senior Level (10 test cases)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Common Fields -->
                 <div>
                   <label class="block text-sm font-bold text-[#384959] mb-3">Candidate Name</label>
                   <input type="text" id="candidateName" required
@@ -477,7 +517,7 @@
                     class="w-full px-4 py-3.5 rounded-xl border-2 border-[#BDDDFC]/30 bg-white/50 transition-all" />
                 </div>
                 <button type="submit" class="w-full btn-primary text-white py-4 rounded-xl font-bold text-lg">
-                  Generate Interview Link
+                  <span id="submitButtonText">Generate Interview Link</span>
                 </button>
               </form>
               <div id="linkContainer"
@@ -856,28 +896,116 @@
         }
       }
 
+      // Session Mode State
+      let sessionMode = 'template'; // 'template' or 'ai'
+
+      // Mode switching
+      document.getElementById('templateModeBtn')?.addEventListener('click', function () {
+        sessionMode = 'template';
+        document.getElementById('templateFields').classList.remove('hidden');
+        document.getElementById('aiFields').classList.add('hidden');
+        document.getElementById('assessmentSelect').required = true;
+        document.getElementById('jobDescription').required = false;
+
+        // Update button styles
+        this.classList.add('active', 'border-primary', 'bg-primary/10', 'text-primary');
+        this.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
+        document.getElementById('aiModeBtn').classList.remove('active', 'border-primary', 'bg-primary/10', 'text-primary');
+        document.getElementById('aiModeBtn').classList.add('border-gray-200', 'bg-white', 'text-gray-600');
+
+        document.getElementById('submitButtonText').textContent = 'Generate Interview Link';
+      });
+
+      document.getElementById('aiModeBtn')?.addEventListener('click', function () {
+        sessionMode = 'ai';
+        document.getElementById('templateFields').classList.add('hidden');
+        document.getElementById('aiFields').classList.remove('hidden');
+        document.getElementById('assessmentSelect').required = false;
+        document.getElementById('jobDescription').required = true;
+
+        // Update button styles
+        this.classList.add('active', 'border-primary', 'bg-primary/10', 'text-primary');
+        this.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
+        document.getElementById('templateModeBtn').classList.remove('active', 'border-primary', 'bg-primary/10', 'text-primary');
+        document.getElementById('templateModeBtn').classList.add('border-gray-200', 'bg-white', 'text-gray-600');
+
+        document.getElementById('submitButtonText').textContent = '✨ Generate AI Assessment';
+      });
+
       async function handleCreateSession(e) {
         e.preventDefault()
         document.getElementById("linkContainer").classList.add("hidden")
+
+        const candidateName = document.getElementById("candidateName").value;
+        const position = document.getElementById("position").value;
+
         try {
-          const res = await fetch(`${apiBaseUrl}/sessions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${jwtToken}`,
-            },
-            body: JSON.stringify({
-              candidateName: document.getElementById("candidateName").value,
-              position: document.getElementById("position").value,
-              assessmentId: document.getElementById("assessmentSelect").value,
-            }),
-          })
-          const data = await res.json()
-          document.getElementById("shareableLink").value = data.shareableLink
-          document.getElementById("linkContainer").classList.remove("hidden")
-          document.getElementById("sessionForm").reset()
+          let res, data;
+
+          if (sessionMode === 'ai') {
+            // AI-Generated Session
+            const jobDescription = document.getElementById("jobDescription").value;
+            const complexity = document.getElementById("complexitySelect").value;
+
+            if (!jobDescription) {
+              alert("Please enter a job description");
+              return;
+            }
+
+            document.getElementById('submitButtonText').textContent = '⏳ Generating...';
+
+            res = await fetch(`${apiBaseUrl}/sessions/generate-ai`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${jwtToken}`,
+              },
+              body: JSON.stringify({
+                candidateName,
+                position,
+                jobDescription,
+                complexity
+              }),
+            });
+
+            document.getElementById('submitButtonText').textContent = '✨ Generate AI Assessment';
+          } else {
+            // Template-Based Session
+            const assessmentId = document.getElementById("assessmentSelect").value;
+
+            res = await fetch(`${apiBaseUrl}/sessions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${jwtToken}`,
+              },
+              body: JSON.stringify({
+                candidateName,
+                position,
+                assessmentId,
+              }),
+            });
+          }
+
+          data = await res.json();
+
+          if (!res.ok) {
+            throw new Error(data.message || 'Failed to create session');
+          }
+
+          document.getElementById("shareableLink").value = data.shareableLink;
+          document.getElementById("linkContainer").classList.remove("hidden");
+          document.getElementById("sessionForm").reset();
+
+          if (sessionMode === 'ai') {
+            alert(`✅ ${data.message || 'AI assessment generated successfully!'}`);
+          }
         } catch (error) {
-          alert("Session creation failed")
+          console.error(error);
+          alert(`Session creation failed: ${error.message}`);
+          if (sessionMode === 'ai') {
+            document.getElementById('submitButtonText').textContent = '✨ Generate AI Assessment';
+          }
         }
       }
 

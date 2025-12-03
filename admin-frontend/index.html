@@ -6,18 +6,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Interview Platform - Admin</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#007AFF', // System Blue
+            secondary: '#86868B', // Gray
+            success: '#34C759', // Green
+            danger: '#FF3B30', // Red
+            background: '#F5F5F7', // Off-white
+            surface: '#FFFFFF', // Pure white
+            dark: '#1D1D1F', // Dark Gray
+            border: '#E5E5EA', // Light Gray Border
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          boxShadow: {
+            'apple': '0 4px 24px rgba(0, 0, 0, 0.04)',
+            'apple-hover': '0 8px 32px rgba(0, 0, 0, 0.08)',
+            'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
+          }
+        }
+      }
+    }
+  </script>
   <link rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
-    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --primary: #6a89a7;
-      --secondary: #bdddfc;
-      --accent: #88bdf2;
-      --dark: #384959;
-      --light: #f8fafb;
+      --primary: #007AFF;
+      --background: #F5F5F7;
+      --surface: #FFFFFF;
+      --text: #1D1D1F;
     }
 
     * {
@@ -25,79 +49,93 @@
     }
 
     body {
-      background: linear-gradient(135deg, #f8fafb 0%, #e8f0f5 100%);
+      background-color: var(--background);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
       min-height: 100vh;
     }
 
-    .glass-card {
+    /* Glassmorphism */
+    .glass-sidebar {
       background: rgba(255, 255, 255, 0.8);
       backdrop-filter: blur(20px);
-      border: 1px solid rgba(189, 221, 252, 0.2);
-      box-shadow: 0 8px 32px rgba(106, 137, 167, 0.08);
+      -webkit-backdrop-filter: blur(20px);
+      border-right: 1px solid rgba(0, 0, 0, 0.05);
     }
 
-    .glass-card:hover {
-      box-shadow: 0 12px 48px rgba(106, 137, 167, 0.12);
+    .glass-modal {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(0, 0, 0, 0.05);
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.1);
     }
 
+    /* Apple-style Cards */
+    .apple-card {
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+      border: 1px solid rgba(0, 0, 0, 0.02);
+      transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    .apple-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Navigation */
     .nav-item {
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
+      transition: all 0.2s ease;
+      border-radius: 12px;
+      margin-bottom: 4px;
+      color: #86868B;
     }
 
-    .nav-item::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 0;
-      height: 100%;
-      width: 3px;
-      background: linear-gradient(180deg, #88bdf2 0%, #6a89a7 100%);
-      transform: scaleY(0);
-      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .nav-item.active::before {
-      transform: scaleY(1);
+    .nav-item:hover {
+      background: rgba(0, 0, 0, 0.03);
+      color: #1D1D1F;
     }
 
     .nav-item.active {
-      background: linear-gradient(90deg,
-          rgba(136, 189, 242, 0.12) 0%,
-          rgba(255, 255, 255, 0) 100%);
-      color: #384959;
+      background: rgba(0, 122, 255, 0.1);
+      color: #007AFF;
       font-weight: 600;
     }
 
-    .card {
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-      border: 1px solid rgba(189, 221, 252, 0.3);
-    }
-
-    .card:hover {
-      transform: translateY(-8px);
-      box-shadow: 0 20px 60px rgba(106, 137, 167, 0.15);
-      border-color: rgba(136, 189, 242, 0.5);
-    }
-
+    /* Buttons */
     .btn-primary {
-      background: linear-gradient(135deg, #88bdf2 0%, #6a89a7 100%);
-      box-shadow: 0 4px 16px rgba(136, 189, 242, 0.3);
-      transition: all 0.3s ease;
+      background: #007AFF;
+      color: white;
+      border-radius: 12px;
+      transition: all 0.2s ease;
+      font-weight: 500;
+      box-shadow: 0 2px 8px rgba(0, 122, 255, 0.2);
     }
 
     .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(136, 189, 242, 0.4);
+      background: #0062CC;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
     }
 
-    .stat-card {
-      background: linear-gradient(135deg,
-          rgba(136, 189, 242, 0.15) 0%,
-          rgba(189, 221, 252, 0.1) 100%);
-      border: 1px solid rgba(136, 189, 242, 0.2);
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #D1D1D6;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #8E8E93;
     }
 
     .file-item {
@@ -211,7 +249,7 @@
 <body>
   <!-- Login View -->
   <div id="loginView" class="min-h-screen flex items-center justify-center px-4">
-    <div class="glass-card w-full max-w-md p-10 rounded-3xl shadow-2xl floating">
+    <div class="apple-card w-full max-w-md p-10 shadow-2xl floating">
       <div class="text-center mb-10">
         <div
           class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-[#88BDF2] to-[#6A89A7] flex items-center justify-center text-white text-2xl font-bold">
@@ -240,128 +278,145 @@
   </div>
 
   <!-- Dashboard View -->
-  <div id="dashboardView" class="hidden min-h-screen p-6">
-    <div class="max-w-7xl mx-auto">
-      <!-- Header -->
-      <div class="glass-card rounded-3xl p-8 mb-6 shadow-lg">
-        <div class="flex justify-between items-center">
-          <div>
-            <h1 class="text-4xl font-bold text-[#384959] mb-1">
-              Admin Dashboard
-            </h1>
-            <p class="text-[#6A89A7] font-medium">
-              Manage interviews, assessments, and submissions
-            </p>
-          </div>
-          <div class="flex items-center gap-4">
-            <div class="stat-card px-8 py-4 rounded-2xl backdrop-blur-sm">
-              <div class="text-sm text-[#6A89A7] font-medium mb-1">
-                Active Sessions
-              </div>
-              <div class="text-3xl font-bold text-[#384959]" id="activeSessionsCount">
-                0
-              </div>
-            </div>
-            <div class="stat-card px-8 py-4 rounded-2xl backdrop-blur-sm">
-              <div class="text-sm text-[#6A89A7] font-medium mb-1">
-                Submissions
-              </div>
-              <div class="text-3xl font-bold text-[#384959]" id="submissionsCount">
-                0
-              </div>
-            </div>
-          </div>
+  <!-- Dashboard View -->
+  <div id="dashboardView" class="hidden min-h-screen flex bg-background">
+    <!-- Sidebar -->
+    <aside class="w-64 glass-sidebar h-screen sticky top-0 flex flex-col p-6 z-20">
+      <div class="mb-10 px-2 flex items-center gap-3">
+        <div
+          class="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/30">
+          A
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-dark tracking-tight">Assessy</h1>
+          <p class="text-xs text-secondary font-medium">Admin Portal</p>
         </div>
       </div>
 
-      <div class="grid grid-cols-5 gap-6">
-        <!-- Sidebar Navigation -->
-        <div class="col-span-1">
-          <div class="glass-card rounded-3xl p-4 shadow-lg">
-            <nav class="space-y-2">
-              <div class="nav-item active px-5 py-4 rounded-2xl font-semibold text-[#384959]" data-view="sessions">
-                <span class="text-xl mr-3">📊</span> Sessions
-              </div>
-              <div class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]" data-view="submissions">
-                <span class="text-xl mr-3">📁</span> Submissions
-              </div>
-              <div class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]" data-view="assessments">
-                <span class="text-xl mr-3">📝</span> Assessments
-              </div>
-              <div class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]" data-view="users" id="usersNav">
-                <span class="text-xl mr-3">👥</span> Users
-              </div>
-              <div class="nav-item px-5 py-4 rounded-2xl font-semibold text-[#6A89A7]" data-view="create">
-                <span class="text-xl mr-3">✨</span> Create Session
-              </div>
-            </nav>
+      <nav class="space-y-1 flex-1">
+        <div
+          class="nav-item active px-4 py-3 rounded-xl font-medium text-secondary hover:text-dark flex items-center gap-3 transition-all"
+          data-view="sessions">
+          <span class="text-lg">📊</span> Sessions
+        </div>
+        <div
+          class="nav-item px-4 py-3 rounded-xl font-medium text-secondary hover:text-dark flex items-center gap-3 transition-all"
+          data-view="submissions">
+          <span class="text-lg">📁</span> Submissions
+        </div>
+        <div
+          class="nav-item px-4 py-3 rounded-xl font-medium text-secondary hover:text-dark flex items-center gap-3 transition-all"
+          data-view="assessments">
+          <span class="text-lg">📝</span> Assessments
+        </div>
+        <div
+          class="nav-item px-4 py-3 rounded-xl font-medium text-secondary hover:text-dark flex items-center gap-3 transition-all"
+          data-view="users" id="usersNav">
+          <span class="text-lg">👥</span> Users
+        </div>
+        <div
+          class="nav-item px-4 py-3 rounded-xl font-medium text-secondary hover:text-dark flex items-center gap-3 transition-all"
+          data-view="create">
+          <span class="text-lg">✨</span> Create Session
+        </div>
+      </nav>
+
+      <div class="mt-auto pt-6 border-t border-gray-100">
+        <button onclick="logout()"
+          class="w-full px-4 py-3 rounded-xl font-medium text-danger hover:bg-red-50 text-left transition-all flex items-center gap-3">
+          <span>🚪</span> Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 h-screen overflow-y-auto">
+      <div class="max-w-7xl mx-auto p-8">
+        <!-- Header & Stats -->
+        <div class="flex justify-between items-end mb-8">
+          <div>
+            <h1 class="text-3xl font-bold text-dark mb-2">Dashboard</h1>
+            <p class="text-secondary">Welcome back, Admin</p>
+          </div>
+          <div class="flex gap-4">
+            <div class="apple-card px-6 py-3 flex flex-col items-center min-w-[140px]">
+              <span class="text-xs font-semibold text-secondary uppercase tracking-wider">Active</span>
+              <span class="text-2xl font-bold text-dark mt-1" id="activeSessionsCount">0</span>
+            </div>
+            <div class="apple-card px-6 py-3 flex flex-col items-center min-w-[140px]">
+              <span class="text-xs font-semibold text-secondary uppercase tracking-wider">Submissions</span>
+              <span class="text-2xl font-bold text-dark mt-1" id="submissionsCount">0</span>
+            </div>
           </div>
         </div>
 
-        <!-- Main Content Area -->
-        <div class="col-span-4">
+        <!-- Content Views -->
+        <div class="space-y-6">
           <!-- Users View -->
           <div id="usersView" class="view-content hidden">
-            <div class="glass-card rounded-3xl p-8 shadow-lg">
+            <div class="apple-card p-8">
               <div class="flex justify-between items-center mb-8">
-                <h2 class="text-3xl font-bold text-[#384959]">
+                <h2 class="text-2xl font-bold text-dark">
                   User Management
                 </h2>
-                <button id="createUserBtn" class="btn-primary px-8 py-3.5 text-white rounded-xl font-semibold">
+                <button id="createUserBtn" class="btn-primary px-6 py-2.5 text-white rounded-xl font-medium text-sm">
                   + Add User
                 </button>
               </div>
-              <div class="overflow-hidden rounded-2xl border border-[#BDDDFC]/30">
+              <div class="overflow-hidden rounded-xl border border-gray-100">
                 <table class="w-full">
-                  <thead class="bg-gradient-to-r from-[#F8FAFB] to-white">
+                  <thead class="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">Username</th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">Role</th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">Created At</th>
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
+                        Username</th>
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">Role
+                      </th>
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
+                        Created At</th>
                     </tr>
                   </thead>
-                  <tbody id="usersTableBody" class="divide-y divide-[#BDDDFC]/20"></tbody>
+                  <tbody id="usersTableBody" class="divide-y divide-gray-50"></tbody>
                 </table>
               </div>
             </div>
           </div>
           <!-- Sessions View -->
           <div id="sessionsView" class="view-content">
-            <div class="glass-card rounded-3xl p-8 shadow-lg">
+            <div class="apple-card p-8">
               <div class="flex justify-between items-center mb-8">
-                <h2 class="text-3xl font-bold text-[#384959]">
+                <h2 class="text-2xl font-bold text-dark">
                   All Sessions
                 </h2>
                 <button id="refreshSessionsBtn"
-                  class="px-6 py-3 bg-white rounded-xl hover:bg-[#F8FAFB] transition font-semibold text-[#384959] border border-[#BDDDFC]/30">
-                  🔄 Refresh
+                  class="px-4 py-2 bg-white rounded-lg hover:bg-gray-50 transition font-medium text-secondary border border-gray-200 text-sm flex items-center gap-2">
+                  <span>🔄</span> Refresh
                 </button>
               </div>
-              <div class="overflow-hidden rounded-2xl border border-[#BDDDFC]/30">
+              <div class="overflow-hidden rounded-xl border border-gray-100">
                 <table class="w-full">
-                  <thead class="bg-gradient-to-r from-[#F8FAFB] to-white">
+                  <thead class="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Candidate
                       </th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Position
                       </th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Assessment
                       </th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Status
                       </th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Created
                       </th>
-                      <th class="text-left py-5 px-6 font-bold text-[#384959] text-sm">
+                      <th class="text-left py-4 px-6 font-semibold text-secondary text-xs uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
                   </thead>
-                  <tbody id="sessionsTableBody" class="divide-y divide-[#BDDDFC]/20"></tbody>
+                  <tbody id="sessionsTableBody" class="divide-y divide-gray-50"></tbody>
                 </table>
               </div>
             </div>
@@ -369,28 +424,31 @@
 
           <!-- Submissions View -->
           <div id="submissionsView" class="view-content hidden">
-            <div class="glass-card rounded-3xl p-8 shadow-lg">
-              <h2 class="text-3xl font-bold text-[#384959] mb-8">
+            <div class="apple-card p-8">
+              <h2 class="text-2xl font-bold text-dark mb-8">
                 Candidate Submissions
               </h2>
-              <div id="submissionsGrid" class="grid grid-cols-1 gap-5"></div>
+              <div id="submissionsGrid" class="grid grid-cols-1 gap-4"></div>
             </div>
           </div>
 
           <!-- Assessments View -->
           <div id="assessmentsView" class="view-content hidden">
-            <div class="glass-card rounded-3xl p-8 shadow-lg">
+            <div class="apple-card p-8">
               <div class="flex justify-between items-center mb-8">
-                <h2 class="text-3xl font-bold text-[#384959]">
+                <h2 class="text-2xl font-bold text-dark">
                   Assessment Library
                 </h2>
-                <button id="createAssessmentBtn" class="btn-primary px-8 py-3.5 text-white rounded-xl font-semibold">
-                  + New Assessment
-                </button>
-                <button id="generateAiBtn"
-                  class="ml-4 px-8 py-3.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition shadow-md">
-                  ✨ Generate with AI
-                </button>
+                <div class="flex gap-3">
+                  <button id="createAssessmentBtn"
+                    class="btn-primary px-6 py-2.5 text-white rounded-xl font-medium text-sm">
+                    + New Assessment
+                  </button>
+                  <button id="generateAiBtn"
+                    class="px-6 py-2.5 bg-purple-600 text-white rounded-xl font-medium text-sm hover:bg-purple-700 transition shadow-md flex items-center gap-2">
+                    <span>✨</span> Generate with AI
+                  </button>
+                </div>
               </div>
               <div id="assessmentsGrid" class="grid grid-cols-2 gap-6"></div>
             </div>
@@ -398,7 +456,7 @@
 
           <!-- Create Session View -->
           <div id="createView" class="view-content hidden">
-            <div class="glass-card rounded-3xl p-10 shadow-lg max-w-2xl">
+            <div class="apple-card p-10 max-w-2xl mx-auto">
               <h2 class="text-3xl font-bold text-[#384959] mb-8">
                 Create Interview Session
               </h2>
@@ -439,7 +497,7 @@
           </div>
         </div>
       </div>
-    </div>
+  </div>
   </div>
 
   <!-- Submission Detail Modal -->
@@ -477,7 +535,8 @@
               </button>
             </div>
           </div>
-          <div class="col-span-2">
+          <div class="col-span-2 space-y-6">
+            <!-- Files Section -->
             <div class="bg-white rounded-2xl border border-[#BDDDFC]/30 overflow-hidden shadow-sm">
               <div class="grid grid-cols-4">
                 <div class="col-span-1 bg-[#F8FAFB] border-r border-[#BDDDFC]/20 p-5 max-h-[600px] overflow-y-auto">
@@ -492,6 +551,14 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <!-- Question Responses Section -->
+            <div class="bg-white rounded-2xl border border-[#BDDDFC]/30 overflow-hidden shadow-sm p-6">
+              <h4 class="font-bold text-[#384959] mb-4 flex items-center gap-2">
+                <span>📝</span> Question Responses
+              </h4>
+              <div id="questionResponsesSection"></div>
             </div>
           </div>
         </div>
@@ -988,17 +1055,31 @@
           document.getElementById("candidateDetails").innerHTML = `
               <div class="space-y-2">
                 <p class="text-[#384959]"><span class="font-bold">Name:</span> ${details.firstName} ${details.lastName}</p>
+                <p class="text-[#384959]"><span class="font-bold">Position:</span> ${details.position || 'N/A'}</p>
+                <p class="text-[#384959]"><span class="font-bold">Score:</span> ${details.score || 0}</p>
+                
+                ${details.highestEducation && details.highestEducation.course !== "N/A" ? `
                 <hr class="my-3 border-[#BDDDFC]/30">
                 <p class="font-bold text-[#384959]">Highest Education:</p>
                 <p class="text-xs ml-2 text-[#6A89A7]">📚 ${details.highestEducation.course}</p>
                 <p class="text-xs ml-2 text-[#6A89A7]">🏫 ${details.highestEducation.college}</p>
                 <p class="text-xs ml-2 text-[#6A89A7]">📅 ${details.highestEducation.year}</p>
-                <hr class="my-3 border-[#BDDDFC]/30">
-                <p class="font-bold text-[#384959]">Second Highest:</p>
-                <p class="text-xs ml-2 text-[#6A89A7]">📚 ${details.secondHighestEducation.course}</p>
-                <p class="text-xs ml-2 text-[#6A89A7]">🏫 ${details.secondHighestEducation.college}</p>
-                <p class="text-xs ml-2 text-[#6A89A7]">📅 ${details.secondHighestEducation.year}</p>
+                ` : ''}
               </div>
+            `
+
+          // Populate question responses section
+          document.getElementById("questionResponsesSection").innerHTML = `
+              ${details.answers && details.answers.length > 0 ? details.answers.map((ans, i) => `
+                  <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-3 hover:shadow-md transition">
+                      <div class="flex justify-between items-start mb-2">
+                          <p class="font-semibold text-slate-700 flex-1">${i + 1}. ${ans.question_text}</p>
+                          <span class="text-xs font-bold px-3 py-1 rounded-full ${ans.is_correct ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${ans.is_correct ? '✓ Correct' : '✗ Incorrect'}</span>
+                      </div>
+                      <p class="text-slate-600 mt-2"><span class="font-medium">Candidate's Answer:</span> <span class="font-semibold">${ans.response}</span></p>
+                      ${!ans.is_correct ? `<p class="text-slate-500 text-sm mt-2"><span class="font-medium">Correct Answer:</span> <span class="font-semibold text-green-700">${ans.correct_answer}</span></p>` : ''}
+                  </div>
+              `).join('') : '<p class="text-gray-500 text-center py-8">No question responses found.</p>'}
             `
 
           if (status.running) {
@@ -1620,6 +1701,10 @@
         console.error("Error saving assessment", error)
         alert("Error saving assessment")
       }
+    }
+    function logout() {
+      localStorage.removeItem("adminToken")
+      location.reload()
     }
   </script>
 </body>

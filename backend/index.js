@@ -114,6 +114,46 @@ async function initializeDatabase() {
         );
       `)
 
+      // Session Questions Table (for per-session AI generation)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS session_questions (
+          id SERIAL PRIMARY KEY,
+          session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK (type IN ('MCQ', 'FILL_IN_THE_BLANKS', 'CODING')),
+          question_text TEXT NOT NULL,
+          options JSONB,
+          correct_answer TEXT,
+          points INTEGER DEFAULT 1,
+          difficulty VARCHAR(20),
+          metadata JSONB,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+
+      // Add complexity column to sessions if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='sessions' AND column_name='complexity') 
+          THEN
+            ALTER TABLE sessions ADD COLUMN complexity VARCHAR(20) DEFAULT 'Medium';
+          END IF;
+        END $$;
+      `)
+
+      // Add job_description column to sessions if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='sessions' AND column_name='job_description') 
+          THEN
+            ALTER TABLE sessions ADD COLUMN job_description TEXT;
+          END IF;
+        END $$;
+      `)
+
       console.log('Database tables are ready.')
 
       // Seed Admin User
@@ -299,6 +339,101 @@ app.post("/sessions", authenticateJWT, async (req, res) => {
   }
 })
 
+// AI-Powered Session Creation
+const { generateSessionQuestions } = require("./groqService");
+
+app.post("/sessions/generate-ai", authenticateJWT, async (req, res) => {
+  const { candidateName, position, jobDescription, complexity } = req.body;
+
+  if (!candidateName || !position || !jobDescription) {
+    return res.status(400).json({
+      message: "Candidate name, position, and job description are required.",
+    });
+  }
+
+  const token = crypto.randomBytes(24).toString("hex");
+  const complexityLevel = complexity || 'Medium';
+
+  try {
+    // Generate questions using AI
+    console.log(`Generating ${complexityLevel} assessment for ${jobDescription}...`);
+    const assessmentData = await generateSessionQuestions(jobDescription, complexityLevel);
+
+    // Create session
+    const sessionResult = await pool.query(
+      "INSERT INTO sessions (token, status, candidate_name, position, complexity, job_description, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+      [token, "CREATED", candidateName, position, complexityLevel, jobDescription, req.user.id]
+    );
+    const sessionId = sessionResult.rows[0].id;
+
+    // Save session-specific questions
+    for (const q of assessmentData.questions) {
+      await pool.query(
+        "INSERT INTO session_questions (session_id, type, question_text, options, correct_answer, points, difficulty) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          sessionId,
+          q.type,
+          q.question_text,
+          q.options ? JSON.stringify(q.options) : null,
+          q.correct_answer,
+          q.points || 1,
+          q.difficulty || complexityLevel
+        ]
+      );
+    }
+
+    // Save coding challenge
+    const codingChallenge = assessmentData.coding_challenge;
+    if (codingChallenge) {
+      await pool.query(
+        "INSERT INTO session_questions (session_id, type, question_text, metadata, difficulty) VALUES ($1, $2, $3, $4, $5)",
+        [
+          sessionId,
+          "CODING",
+          codingChallenge.title,
+          JSON.stringify({
+            description: codingChallenge.description,
+            constraints: codingChallenge.constraints,
+            examples: codingChallenge.examples,
+            template_code: codingChallenge.template_code,
+            filename: codingChallenge.filename,
+            test_cases: codingChallenge.test_cases
+          }),
+          codingChallenge.difficulty || complexityLevel
+        ]
+      );
+
+      // Save files
+      const sessionPath = path.join(__dirname, "session_files", sessionId.toString());
+      fs.mkdirSync(sessionPath, { recursive: true });
+
+      const fileExt = codingChallenge.filename.endsWith('.py') ? '.py' : '.js';
+      let testRunner = '';
+
+      if (fileExt === '.py') {
+        testRunner = `\nif __name__ == "__main__":\n    test_cases = ${JSON.stringify(codingChallenge.test_cases, null, 4)}\n    passed = 0\n    print("\\n--- Running ${codingChallenge.test_cases.length} Test Cases ---")\n    for i, tc in enumerate(test_cases):\n        try:\n            result = solution(*tc["input"])\n            if result == tc["output"]:\n                print(f"Test {i+1}: PASS ✓")\n                passed += 1\n            else:\n                print(f"Test {i+1}: FAIL ✗ (Expected {tc['output']}, Got {result})")\n        except Exception as e:\n            print(f"Test {i+1}: ERROR - {e}")\n    print(f"\\nTotal: {passed}/{len(test_cases)} passed")`;
+      } else {
+        testRunner = `\n// Test Runner\n(function() {\n    const testCases = ${JSON.stringify(codingChallenge.test_cases, null, 4)};\n    let passed = 0;\n    console.log("\\n--- Running ${codingChallenge.test_cases.length} Test Cases ---");\n    testCases.forEach((tc, i) => {\n        try {\n            const result = solution(...tc.input);\n            if (JSON.stringify(result) === JSON.stringify(tc.output)) {\n                console.log(\`Test \${i+1}: PASS ✓\`);\n                passed++;\n            } else {\n                console.log(\`Test \${i+1}: FAIL ✗ (Expected \${JSON.stringify(tc.output)}, Got \${JSON.stringify(result)})\`);\n            }\n        } catch (e) {\n            console.log(\`Test \${i+1}: ERROR - \${e.message}\`);\n        }\n    });\n    console.log(\`\\nTotal: \${passed}/\${testCases.length} passed\`);\n})();`;
+      }
+
+      fs.writeFileSync(path.join(sessionPath, codingChallenge.filename), codingChallenge.template_code + testRunner);
+
+      const readme = `# ${codingChallenge.title}\n\nDifficulty: **${codingChallenge.difficulty}**\n\n## Description\n\n${codingChallenge.description}\n\n## Constraints\n\n${codingChallenge.constraints?.map(c => `- ${c}`).join('\n') || 'None'}\n\n## Examples\n\n${codingChallenge.examples?.map((ex, i) => `### Example ${i + 1}\n\n**Input:** ${ex.input}\n**Output:** ${ex.output}\n**Explanation:** ${ex.explanation}\n`).join('\n') || 'None'}`;
+      fs.writeFileSync(path.join(sessionPath, "README.md"), readme);
+    }
+
+    const shareableLink = `http://api.interview.localhost/session/${token}`;
+    res.status(201).json({
+      shareableLink,
+      token,
+      message: `Session created with ${assessmentData.questions.length} questions (${complexityLevel} difficulty)`
+    });
+  } catch (error) {
+    console.error("Failed to create AI session:", error);
+    res.status(500).json({ message: "Failed to generate assessment", error: error.message });
+  }
+});
+
 app.get("/admin/sessions", authenticateJWT, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -315,6 +450,46 @@ app.get("/admin/sessions", authenticateJWT, async (req, res) => {
   }
 })
 
+// Interviewer Question Preview
+app.get("/admin/sessions/:token/questions", authenticateJWT, async (req, res) => {
+  const { token } = req.params;
+
+  try {
+    const sessionResult = await pool.query(
+      "SELECT id, complexity, job_description FROM sessions WHERE token = $1",
+      [token]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // Fetch all session questions
+    const questionsResult = await pool.query(
+      "SELECT * FROM session_questions WHERE session_id = $1 ORDER BY id ASC",
+      [session.id]
+    );
+
+    const questions = questionsResult.rows.map(q => ({
+      ...q,
+      options: q.options,
+      metadata: q.metadata
+    }));
+
+    res.json({
+      complexity: session.complexity,
+      jobDescription: session.job_description,
+      questions: questions.filter(q => q.type !== 'CODING'),
+      codingChallenge: questions.find(q => q.type === 'CODING') || null
+    });
+  } catch (error) {
+    console.error("Error fetching session questions:", error);
+    res.status(500).send("Error fetching questions");
+  }
+});
+
 app.post("/assessments/generate", authenticateJWT, async (req, res) => {
   const { jobDescription } = req.body;
   if (!jobDescription) {
@@ -327,6 +502,53 @@ app.post("/assessments/generate", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Failed to generate assessment" });
   }
 });
+
+function generateTestRunner(filename, testCases) {
+  const ext = path.extname(filename);
+  if (ext === '.py') {
+    return `
+if __name__ == "__main__":
+    test_cases = ${JSON.stringify(testCases)}
+    passed = 0
+    print("\\n--- Running Automated Tests ---")
+    for i, tc in enumerate(test_cases):
+        try:
+            result = solution(*tc["input"])
+            if result == tc["output"]:
+                print(f"Test {i+1}: PASS")
+                passed += 1
+            else:
+                print(f"Test {i+1}: FAIL (Expected {tc['output']}, Got {result})")
+        except Exception as e:
+            print(f"Test {i+1}: ERROR ({e})")
+    print(f"Total Passed: {passed}/{len(test_cases)}")
+`;
+  } else if (ext === '.js') {
+    return `
+// Test Runner
+(function() {
+    const testCases = ${JSON.stringify(testCases)};
+    let passed = 0;
+    console.log("\\n--- Running Automated Tests ---");
+    testCases.forEach((tc, i) => {
+        try {
+            const result = solution(...tc.input);
+            if (JSON.stringify(result) === JSON.stringify(tc.output)) {
+                console.log(\`Test \${i+1}: PASS\`);
+                passed++;
+            } else {
+                console.log(\`Test \${i+1}: FAIL (Expected \${JSON.stringify(tc.output)}, Got \${JSON.stringify(result)})\`);
+            }
+        } catch (e) {
+            console.log(\`Test \${i+1}: ERROR (\${e.message})\`);
+        }
+    });
+    console.log(\`Total Passed: \${passed}/\${testCases.length}\`);
+})();
+`;
+  }
+  return '';
+}
 
 app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
   const { title, jobDescription, questions, codingChallenge } = req.body;
@@ -365,13 +587,18 @@ app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
     const assessmentPath = path.join(__dirname, "assessment_files", String(assessmentId));
     fs.mkdirSync(assessmentPath, { recursive: true });
 
-    // Save solution/template file
-    fs.writeFileSync(path.join(assessmentPath, codingChallenge.filename), codingChallenge.template_code);
+    // Save solution/template file with embedded test runner
+    let fileContent = codingChallenge.template_code;
+    if (Array.isArray(codingChallenge.test_cases)) {
+      const runnerCode = generateTestRunner(codingChallenge.filename, codingChallenge.test_cases);
+      fileContent += "\n" + runnerCode;
+    }
+    fs.writeFileSync(path.join(assessmentPath, codingChallenge.filename), fileContent);
 
     // Save instructions/readme
     fs.writeFileSync(path.join(assessmentPath, "README.md"), `# ${codingChallenge.title}\n\n${codingChallenge.description}`);
 
-    // Save test cases
+    // Save test cases (still useful to have separately)
     fs.writeFileSync(path.join(assessmentPath, "tests.json"), JSON.stringify(codingChallenge.test_cases, null, 2));
 
     // Also add a question record for the coding challenge
@@ -716,11 +943,45 @@ app.get(
         `${token}_details.json`
       )
 
-      if (!fs.existsSync(detailsPath)) {
-        return res.status(404).json({ message: "Submission details not found" })
+      let details = {}
+
+      if (fs.existsSync(detailsPath)) {
+        details = JSON.parse(fs.readFileSync(detailsPath, "utf8"))
+      } else {
+        // Fallback to database for new flow
+        const sessionResult = await pool.query(`
+          SELECT s.candidate_name, s.position, s.score, s.created_at, s.completed_at,
+                 a.title as assessment_title
+          FROM sessions s
+          LEFT JOIN assessments a ON s.assessment_id = a.id
+          WHERE s.token = $1
+        `, [token])
+
+        if (sessionResult.rows.length > 0) {
+          const session = sessionResult.rows[0]
+          details = {
+            firstName: session.candidate_name ? session.candidate_name.split(' ')[0] : 'Unknown',
+            lastName: session.candidate_name ? session.candidate_name.split(' ').slice(1).join(' ') : '',
+            highestEducation: { course: "N/A", college: "N/A", year: "N/A" },
+            secondHighestEducation: { course: "N/A", college: "N/A", year: "N/A" },
+            position: session.position,
+            score: session.score
+          }
+        } else if (!fs.existsSync(detailsPath)) {
+          return res.status(404).json({ message: "Submission details not found" })
+        }
       }
 
-      const details = JSON.parse(fs.readFileSync(detailsPath, "utf8"))
+      // ALWAYS Fetch answers from DB
+      const answersResult = await pool.query(`
+        SELECT q.question_text, q.type, cr.response, cr.is_correct, q.points, q.correct_answer
+        FROM candidate_responses cr
+        JOIN questions q ON cr.question_id = q.id
+        WHERE cr.session_id = (SELECT id FROM sessions WHERE token = $1)
+      `, [token])
+
+      details.answers = answersResult.rows
+
       res.json(details)
     } catch (error) {
       console.error("Error fetching submission details:", error)

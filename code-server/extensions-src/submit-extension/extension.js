@@ -6,6 +6,14 @@ const fs = require("fs")
 const path = require("path")
 
 function activate(context) {
+  // Create Status Bar Item for Run Program
+  const runButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  runButton.text = "$(play) Run the Program";
+  runButton.tooltip = "Run the current file";
+  runButton.command = "code-runner.run";
+  runButton.show();
+  context.subscriptions.push(runButton);
+
   context.subscriptions.push(
     vscode.commands.registerCommand("interview.submitAssignment", () => {
       SubmissionPanel.createOrShow(context.extensionUri)
@@ -265,7 +273,7 @@ class SubmissionPanel {
   }
 }
 
-function deactivate() {}
+function deactivate() { }
 
 module.exports = {
   activate,

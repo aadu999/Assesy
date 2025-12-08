@@ -8,7 +8,9 @@ const path = require("path")
 const cors = require("cors")
 const jwt = require("jsonwebtoken")
 const { execSync } = require("child_process")
-const { generateAssessment } = require("./groqService")
+const { generateAssessment, generateSessionQuestions } = require("./groqService")
+const { gradeSubmission } = require("./gradingService")
+
 
 const app = express()
 const port = 3000
@@ -33,7 +35,7 @@ const submissionUpload = multer({ storage: multer.memoryStorage() })
 
 const pool = new Pool({
   user: "user",
-  host: process.env.DB_HOST || "database",
+  host: process.env.DB_HOST || "localhost",
   database: "interviewdb",
   password: "password",
   port: process.env.DB_PORT || 5432,
@@ -154,6 +156,70 @@ async function initializeDatabase() {
         END $$;
       `)
 
+      // Add score column to sessions if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='sessions' AND column_name='score') 
+          THEN
+            ALTER TABLE sessions ADD COLUMN score INTEGER;
+          END IF;
+        END $$;
+      `)
+
+      // Add created_by column to sessions if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='sessions' AND column_name='created_by') 
+          THEN
+            ALTER TABLE sessions ADD COLUMN created_by INTEGER REFERENCES users(id);
+          END IF;
+        END $$;
+      `)
+
+      // Add education columns to sessions if they don't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='sessions' AND column_name='education_qualification') 
+          THEN
+            ALTER TABLE sessions 
+            ADD COLUMN education_qualification TEXT,
+            ADD COLUMN education_course TEXT,
+            ADD COLUMN education_college TEXT,
+            ADD COLUMN education_year TEXT;
+          END IF;
+        END $$;
+      `)
+
+      // Add job_description column to assessments table if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='assessments' AND column_name='job_description') 
+          THEN
+            ALTER TABLE assessments ADD COLUMN job_description TEXT;
+          END IF;
+        END $$;
+      `)
+
+      // Add created_by column to assessments table if it doesn't exist
+      await client.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='assessments' AND column_name='created_by') 
+          THEN
+            ALTER TABLE assessments ADD COLUMN created_by INTEGER REFERENCES users(id);
+          END IF;
+        END $$;
+      `)
+
       // AI Provider Configuration Table
       await client.query(`
         CREATE TABLE IF NOT EXISTS ai_config (
@@ -203,33 +269,123 @@ async function initializeDatabase() {
   }
 }
 
-async function provisionInterviewContainer(token, assessmentId) {
+initializeDatabase()
+
+// Debug: Reset All Data (for user testing)
+app.delete("/debug/reset", async (req, res) => {
+  try {
+    const client = await pool.connect();
+    // Delete in order to respect FK
+    await client.query("DELETE FROM candidate_responses");
+    await client.query("DELETE FROM session_questions");
+    await client.query("DELETE FROM sessions");
+    await client.query("DELETE FROM questions");
+    await client.query("DELETE FROM assessments");
+    await client.query("DELETE FROM users WHERE role != 'ADMIN'"); // Keep admin? Or just delete all.
+    // Let's delete all users except seed if needed, but for now delete all is safer for clean slate.
+    // Actually, user probably wants to keep their login. "users WHERE role != 'ADMIN'" is better unless they want full nuke.
+    // Let's delete ALL sessions/assessments but keep users to avoid re-login friction, unless requested.
+    // "clear all the data... test from beginning" usually implies business data.
+
+    // Also clean files
+    if (fs.existsSync(path.join(__dirname, "assessment_files"))) {
+      fs.rmSync(path.join(__dirname, "assessment_files"), { recursive: true, force: true });
+      fs.mkdirSync(path.join(__dirname, "assessment_files"));
+    }
+    if (fs.existsSync(path.join(__dirname, "session_files"))) {
+      fs.rmSync(path.join(__dirname, "session_files"), { recursive: true, force: true });
+      fs.mkdirSync(path.join(__dirname, "session_files"));
+    }
+    if (fs.existsSync(path.join(__dirname, "submissions"))) {
+      fs.rmSync(path.join(__dirname, "submissions"), { recursive: true, force: true });
+      fs.mkdirSync(path.join(__dirname, "submissions"));
+    }
+
+    client.release();
+    res.json({ message: "All application data (assessments, sessions, files) cleared." });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Failed to reset data" });
+  }
+});
+
+// Manual DB Fix Endpoint
+app.get("/debug/fix-db", async (req, res) => {
+  try {
+    const client = await pool.connect();
+
+    // Fix 1: Add job_description to assessments
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name='assessments' AND column_name='job_description') 
+        THEN
+          ALTER TABLE assessments ADD COLUMN job_description TEXT;
+        END IF;
+      END $$;
+    `);
+
+    // Fix 2: Add created_by to assessments
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name='assessments' AND column_name='created_by') 
+        THEN
+          ALTER TABLE assessments ADD COLUMN created_by INTEGER REFERENCES users(id);
+        END IF;
+      END $$;
+    `);
+
+    // Fix 3: Add feedback column to sessions
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name='sessions' AND column_name='feedback') 
+        THEN
+          ALTER TABLE sessions ADD COLUMN feedback JSONB;
+        END IF;
+      END $$;
+    `);
+
+    client.release();
+    res.send("Database schema manually patched! You can now try saving again.");
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Failed to patch DB: " + error.message);
+  }
+});
+
+async function provisionInterviewContainer(token, id, isAssessmentId = true) {
   const imageName = "custom-code-server:latest"
   console.log(`Starting to provision container for session: ${token}`)
 
   try {
-    const assessmentFilesPath = path.join(
-      __dirname,
-      "assessment_files",
-      String(assessmentId)
-    )
+    let sourcePath;
+    if (isAssessmentId) {
+      sourcePath = path.join(__dirname, "assessment_files", String(id))
+    } else {
+      sourcePath = path.join(__dirname, "session_files", String(id))
+    }
 
-    if (!fs.existsSync(assessmentFilesPath)) {
-      throw new Error(`Assessment files not found for ID ${assessmentId}`)
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Files not found for ID ${id} (Assessment: ${isAssessmentId})`)
     }
 
     // Log assessment files to verify they exist
-    const assessmentFiles = fs.readdirSync(assessmentFilesPath)
+    const files = fs.readdirSync(sourcePath)
     console.log(
-      `Assessment files found for ID ${assessmentId}:`,
-      assessmentFiles
+      `Files found for ID ${id}:`,
+      files
     )
 
     const sessionHostPath = path.join("/tmp/interview-sessions", token)
     fs.mkdirSync(sessionHostPath, { recursive: true })
 
     // Copy assessment files first
-    fs.cpSync(assessmentFilesPath, sessionHostPath, { recursive: true })
+    fs.cpSync(sourcePath, sessionHostPath, { recursive: true })
     console.log(`Copied all assessment files for session ${token}`)
 
     // Verify files were copied
@@ -250,22 +406,26 @@ async function provisionInterviewContainer(token, assessmentId) {
       Image: imageName,
       name: `session-${token}`,
       Labels: {
-        "traefik.enable": "true",
-        [`traefik.http.routers.session-${token}.rule`]: `Host(\`${token}.interview.localhost\`)`,
-        [`traefik.http.services.service-${token}.loadbalancer.server.port`]:
-          "8443",
-        "traefik.docker.network": "assesy_default_network",
+        "com.assesy.session": token
       },
       HostConfig: {
         NetworkMode: "assesy_default_network",
-        AutoRemove: true,
         Binds: [`${sessionHostPath}:/home/coder/project:rw`],
+        // Publish 8443 to a random host port
+        PortBindings: {
+          "8443/tcp": [{ "HostPort": "" }]
+        }
       },
       Env: [`SESSION_ID=${token}`],
     })
 
     await container.start()
-    console.log(`Container ${container.id} started for session ${token}`)
+
+    // Inspect to find the port
+    const data = await container.inspect();
+    const port = data.NetworkSettings.Ports['8443/tcp'][0].HostPort;
+    console.log(`Container ${container.id} started for session ${token} on port ${port}`);
+
     return container
   } catch (err) {
     console.error(`Failed to provision container for ${token}:`, err)
@@ -316,12 +476,17 @@ app.post("/auth/login", async (req, res) => {
   }
 })
 
-app.post("/auth/register", authenticateJWT, requireAdmin, async (req, res) => {
+app.post("/auth/register", async (req, res) => {
   const { username, password, role } = req.body
-  if (!['INTERVIEWER', 'CANDIDATE'].includes(role)) {
-    return res.status(400).json({ message: "Invalid role" })
+  console.log("Registering user:", username, role);
+  if (!username || !password || !role) {
+    return res.status(400).json({ message: "Username, password, and role are required." })
   }
   try {
+    const existing = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ message: "Username already exists" });
+    }
     await pool.query(
       "INSERT INTO users (username, password, role) VALUES ($1, $2, $3)",
       [username, password, role]
@@ -332,6 +497,72 @@ app.post("/auth/register", authenticateJWT, requireAdmin, async (req, res) => {
     res.status(500).json({ message: "Failed to create user" })
   }
 })
+
+app.get("/assessments", authenticateJWT, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        a.id, 
+        a.title, 
+        a.job_description, 
+        a.created_at, 
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', q.id,
+              'type', q.type,
+              'question_text', q.question_text,
+              'options', q.options,
+              'correct_answer', q.correct_answer
+            ) ORDER BY q.id
+          ) FILTER (WHERE q.id IS NOT NULL), 
+          '[]'::json
+        ) as questions
+      FROM assessments a
+      LEFT JOIN questions q ON a.id = q.assessment_id
+      GROUP BY a.id, a.title, a.job_description, a.created_at
+      ORDER BY a.created_at DESC
+    `);
+    res.json(result.rows)
+  } catch (error) {
+    console.error("Fetch assessments error:", error)
+    res.status(500).json({ message: "Failed to fetch assessments" })
+  }
+})
+
+// Delete Assessment
+app.delete("/assessments/:id", authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Database cascade should handle questions, but let's be safe or rely on FK ON DELETE CASCADE
+    await pool.query("DELETE FROM assessments WHERE id = $1", [id]);
+    res.json({ message: "Assessment deleted successfully" });
+  } catch (error) {
+    console.error("Delete assessment error:", error);
+    res.status(500).json({ message: "Failed to delete assessment" });
+  }
+});
+
+// Delete Session
+app.delete("/admin/sessions/:token", authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const { token } = req.params;
+    const result = await pool.query("DELETE FROM sessions WHERE token = $1 RETURNING id", [token]);
+
+    if (result.rows.length > 0) {
+      // Cleanup container if exists
+      try {
+        const container = docker.getContainer(`session-${token}`);
+        await container.remove({ force: true });
+      } catch (e) { /* ignore if not found */ }
+    }
+
+    res.json({ message: "Session deleted successfully" });
+  } catch (error) {
+    console.error("Delete session error:", error);
+    res.status(500).json({ message: "Failed to delete session" });
+  }
+});
 
 app.get("/users", authenticateJWT, requireAdmin, async (req, res) => {
   try {
@@ -363,9 +594,6 @@ app.post("/sessions", authenticateJWT, async (req, res) => {
     res.status(500).send("Failed to create session.")
   }
 })
-
-// AI-Powered Session Creation
-const { generateSessionQuestions } = require("./groqService");
 
 app.post("/sessions/generate-ai", authenticateJWT, async (req, res) => {
   const { candidateName, position, jobDescription, complexity } = req.body;
@@ -511,7 +739,534 @@ app.get("/admin/sessions/:token/questions", authenticateJWT, async (req, res) =>
     });
   } catch (error) {
     console.error("Error fetching session questions:", error);
-    res.status(500).send("Error fetching questions");
+    res.status(500).json({ message: "Failed to fetch questions" });
+  }
+});
+
+// PUBLIC Candidate Endpoints
+
+// Get Session Questions (Public)
+app.get("/session/:token/details", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const sessionResult = await pool.query(
+      "SELECT id, status, candidate_name, assessment_id FROM sessions WHERE token = $1",
+      [token]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+    const session = sessionResult.rows[0];
+
+    // Fetch questions
+    // First try session_questions (custom session)
+    let questionsResult = await pool.query(
+      "SELECT id, type, question_text, options, metadata FROM session_questions WHERE session_id = $1 ORDER BY id ASC",
+      [session.id]
+    );
+
+    // If no session-specific questions, look for assessment questions
+    if (questionsResult.rows.length === 0 && session.assessment_id) {
+      console.log(`Session ${token} has no custom ques, fetching from Assessment ${session.assessment_id}`);
+      try {
+        const assessmentQs = await pool.query(
+          "SELECT id, type, question_text, options FROM questions WHERE assessment_id = $1 ORDER BY id ASC",
+          [session.assessment_id]
+        );
+        console.log(`Found ${assessmentQs.rows.length} questions for Assessment ${session.assessment_id}`);
+        if (assessmentQs.rows.length > 0) {
+          // Ensure options are parsed if string
+          const finalQs = assessmentQs.rows.map(q => ({
+            ...q,
+            options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options
+          }));
+          questionsResult = { rows: finalQs };
+        }
+      } catch (innerErr) {
+        console.error("Error fetching assessment questions fallback:", innerErr);
+      }
+    }
+
+    res.json({
+      candidateName: session.candidate_name,
+      status: session.status,
+      questions: questionsResult.rows || []
+    });
+  } catch (error) {
+    console.error("Error fetching public session:", error);
+    res.status(500).json({ message: "Failed to load session: " + error.message });
+  }
+});
+
+// Start Code Server Container (Public/Token protected)
+app.post("/session/:token/start", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const sessionResult = await pool.query("SELECT id, assessment_id, status FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    if (session.status === 'COMPLETED') {
+      return res.status(403).json({ message: "Assessment already completed." });
+    }
+
+    // Provision 
+    // If the session has an assessment_id, we should use that to provision files
+    const useAssessmentFiles = !!session.assessment_id;
+    const resourceId = session.assessment_id || session.id;
+
+    let container;
+    try {
+      container = await provisionInterviewContainer(token, resourceId, useAssessmentFiles);
+    } catch (e) {
+      // Handle race condition/idempotency
+      if (e.message.includes('Conflict')) {
+        console.log(`Container for ${token} already exists, reusing...`);
+        const existing = docker.getContainer(`session-${token}`);
+        const state = await existing.inspect();
+        if (!state.State.Running) {
+          await existing.start();
+        }
+        container = existing;
+      } else {
+        throw e;
+      }
+    }
+
+    // Get the mapped port
+    const performInspect = await container.inspect();
+    const hostPort = performInspect.NetworkSettings.Ports['8443/tcp'][0].HostPort;
+
+    // Return localhost URL
+    // Note: In production this would be a real domain
+    const url = `http://localhost:${hostPort}/?folder=/home/coder/project`;
+    res.json({ url });
+
+  } catch (error) {
+    console.error("Start session error:", error);
+    res.status(500).json({ message: "Failed to start environment" });
+  }
+});
+
+app.post("/session/:token/run", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const container = docker.getContainer(`session-${token}`);
+    const inspect = await container.inspect();
+    if (!inspect.State.Running) return res.status(400).json({ message: "Session container not running" });
+
+    const runScript = `
+    if [ -f tests.json ]; then
+        # Create a Python test runner that IMPORTS the solution
+        if [ -f solution.py ]; then
+            cat << 'EOF' > test_runner.py
+import json
+import sys
+import os
+import traceback
+
+# Add current directory to path
+sys.path.append(os.getcwd())
+
+def run_tests():
+    try:
+        with open("tests.json", "r") as f:
+            tests = json.load(f)
+    except FileNotFoundError:
+        print("tests.json not found")
+        return
+
+    # Try to import solution
+    try:
+        from solution import solution
+    except ImportError:
+        print("❌ Error: Could not import 'solution' function from solution.py")
+        print("Ensure your function is named 'solution'.")
+        return
+    except Exception as e:
+        print(f"❌ Error importing solution.py: {e}")
+        traceback.print_exc()
+        return
+
+    passed = 0
+    print(f"Running {len(tests)} Tests...")
+    
+    for i, t in enumerate(tests):
+        # Input should be a list of arguments
+        inputs = t.get("input", [])
+        if not isinstance(inputs, list):
+            inputs = [inputs]
+            
+        expected = t.get("output")
+        
+        try:
+            # Capture stdout to silence user prints if needed, or let them show?
+            # User prints might be useful debugging. We care about RETURN value.
+            
+            result = solution(*inputs)
+            
+            # Simple equality check (can be enhanced for float precision etc)
+            if result == expected:
+                print(f"✅ Test {i+1}: PASS")
+                passed += 1
+            else:
+                print(f"❌ Test {i+1}: FAIL")
+                print(f"   Args: {inputs}")
+                print(f"   Expected: {expected}")
+                print(f"   Got: {result}")
+        except Exception as e:
+            print(f"⚠️ Test {i+1}: ERROR - {e}")
+            traceback.print_exc()
+
+    print(f"\\nTotal: {passed}/{len(tests)} Passed")
+
+if __name__ == "__main__":
+    run_tests()
+EOF
+            python3 test_runner.py
+            
+        elif [ -f solution.js ]; then
+             # Node runner (subprocess for now as standardizing raw JS imports is harder without modules)
+             echo "JS Runner not yet fully implemented for structured tests. Running file..."
+             node solution.js
+        elif [ -f solution.c ]; then
+             # C runner
+             gcc solution.c -o solution && ./solution
+        else
+             echo "No supported solution file found."
+        fi
+    else
+        # No tests.json, just run the file
+        if [ -f solution.py ]; then 
+            python3 solution.py
+        elif [ -f solution.js ]; then 
+            node solution.js
+        elif [ -f solution.c ]; then
+            gcc solution.c -o solution && ./solution
+        else 
+            echo "Solution file not found."
+            ls -al
+        fi
+    fi
+    `;
+
+    // Execute command
+    const exec = await container.exec({
+      Cmd: ['/bin/sh', '-c', runScript],
+      AttachStdout: true,
+      AttachStderr: true
+    });
+
+    const stream = await exec.start({ detach: false, Tty: false });
+    let output = '';
+
+    // Dockerode stream handling
+    container.modem.demuxStream(stream, {
+      write: (chunk) => output += chunk.toString('utf8')
+    }, {
+      write: (chunk) => output += chunk.toString('utf8')
+    });
+
+    stream.on('end', () => {
+      res.json({ output });
+    });
+
+  } catch (err) {
+    console.error("Run error:", err);
+    res.status(500).json({ message: "Failed to execute tests" });
+  }
+});
+
+app.post("/session/:token/answers", async (req, res) => {
+  const { token } = req.params;
+  const { answers } = req.body; // Expects { questionId: ID, answer: "val" }[]
+
+  try {
+    const sessionResult = await pool.query("SELECT id, assessment_id FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    // Determine source of questions
+    // If we have an assessment_id AND session_questions is empty (checked via count?), we assume assessment questions.
+    // But for saving answers, we just need to save the ID. The verification/grading happens later.
+
+    // We should probably check correctness HERE or during submit? 
+    // Submit endpoint calculates score. It assumes `is_correct` is already set in `candidate_responses`.
+    // So we must calculate `is_correct` here.
+
+    // Fetch all correct answers first
+    let dbQuestions = [];
+    // Check session questions first
+    const sqRes = await pool.query("SELECT id, correct_answer FROM session_questions WHERE session_id = $1", [session.id]);
+    if (sqRes.rows.length > 0) {
+      dbQuestions = sqRes.rows.map(q => ({ ...q, source: 'SESSION' }));
+    } else if (session.assessment_id) {
+      // Fallback to assessment questions
+      const aqRes = await pool.query("SELECT id, correct_answer FROM questions WHERE assessment_id = $1", [session.assessment_id]);
+      dbQuestions = aqRes.rows.map(q => ({ ...q, source: 'ASSESSMENT' }));
+    }
+
+    const questionMap = new Map(dbQuestions.map(q => [q.id, q.correct_answer]));
+
+    for (const ans of answers) {
+      const correctAnswer = questionMap.get(parseInt(ans.questionId));
+      const isCorrect = correctAnswer && String(correctAnswer).trim() === String(ans.answer).trim();
+
+      // Upsert response
+      // We need a unique constraint on (session_id, question_id). Assuming it exists or we just insert.
+      // Let's use INSERT ... ON CONFLICT (session_id, question_id) DO UPDATE
+      // First, ensure unique constraint exists or use DELETE/INSERT
+      await pool.query("DELETE FROM candidate_responses WHERE session_id = $1 AND question_id = $2", [session.id, ans.questionId]);
+
+      await pool.query(
+        "INSERT INTO candidate_responses (session_id, question_id, response, is_correct) VALUES ($1, $2, $3, $4)",
+        [session.id, ans.questionId, ans.answer, isCorrect]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Save answers error:", error);
+    res.status(500).json({ message: "Failed to save answers" });
+  }
+});
+
+// Admin/Interviewer Session Result Detail
+app.get("/admin/sessions/:token/result", authenticateJWT, async (req, res) => {
+  const { token } = req.params;
+
+  if (req.user.role === 'CANDIDATE') {
+    return res.status(403).json({ message: "Access denied." });
+  }
+
+  try {
+    const sessionResult = await pool.query(`
+            SELECT 
+                s.*, 
+                a.title as assessment_title 
+            FROM sessions s
+            LEFT JOIN assessments a ON s.assessment_id = a.id
+            WHERE s.token = $1
+        `, [token]);
+
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    // Fetch Responses with Questions
+    // We need to know if we should join `session_questions` or `questions`.
+    // Strategy: Try `session_questions` first. If empty join, try `questions`.
+    // OR just Left Join both and COALESCE.
+    // Note: candidate_responses.question_id matches ID in one of them.
+
+    // Check if session has custom questions
+    const sqCheck = await pool.query("SELECT 1 FROM session_questions WHERE session_id = $1 LIMIT 1", [session.id]);
+    const hasCustomQuestions = sqCheck.rows.length > 0;
+
+    let query = "";
+    if (hasCustomQuestions) {
+      query = `
+            SELECT 
+                cr.response, cr.is_correct, 
+                sq.question_text, sq.type, sq.options, sq.correct_answer 
+            FROM candidate_responses cr
+            JOIN session_questions sq ON cr.question_id = sq.id
+            WHERE cr.session_id = $1
+        `;
+    } else {
+      // Assessment Fallback
+      query = `
+            SELECT 
+                cr.response, cr.is_correct, 
+                q.question_text, q.type, q.options, q.correct_answer 
+            FROM candidate_responses cr
+            JOIN questions q ON cr.question_id = q.id
+            WHERE cr.session_id = $1
+        `;
+    }
+
+    const responsesResult = await pool.query(query, [session.id]);
+    const responses = responsesResult.rows;
+
+    res.json({
+      ...session,
+      responses
+    });
+
+  } catch (error) {
+    console.error("Error fetching session result:", error);
+    res.status(500).send("Error fetching session result");
+  }
+});
+
+// GET Download Submission
+app.get("/admin/sessions/:token/download", authenticateJWT, requireAdmin, async (req, res) => {
+  const { token } = req.params;
+  try {
+    const sessionRes = await pool.query("SELECT id, status FROM sessions WHERE token = $1", [token]);
+    if (sessionRes.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionRes.rows[0];
+
+    const tarPath = path.join(__dirname, "submissions", `${session.id}.tar`);
+    if (!fs.existsSync(tarPath)) {
+      return res.status(404).json({ message: "Submission file not found" });
+    }
+
+    // Return the tar file (client can rename to .tar or .zip, usually .tar or extract)
+    // Or if we want to be fancy, convert to Zip. 
+    // User asked for "Download Zip".
+    // Let's unzip tar to memory and zip it? That might be heavy.
+    // Easiest: Just send the tar, but content-disposition as zip? No that's corrupt.
+    // Let's just send the tar for now, user can handle it.
+    // Actually, let's try to make it a zip.
+    const AdmZip = require('adm-zip');
+    // We can't easily convert tar to zip without extracting.
+    // Let's just send the tar file but name it download.tar.
+    // Or, assume we have the zip if we graded it? 
+    // In submit logic we used adm-zip to zip the extracted folder for grading...
+    // But we didn't save that zip.
+    // So, serve the TAR. Most OS handle tar.
+
+    res.download(tarPath, `submission-${session.id}.tar`);
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Download failed" });
+  }
+});
+
+// Admin Container Management
+
+// GET Status
+app.get("/admin/sessions/:token/container/status", authenticateJWT, requireAdmin, async (req, res) => {
+  const { token } = req.params;
+  try {
+    const container = docker.getContainer(`session-${token}`);
+    const data = await container.inspect();
+    const port = data.NetworkSettings.Ports['8443/tcp'] ? data.NetworkSettings.Ports['8443/tcp'][0].HostPort : null;
+    res.json({
+      status: data.State.Running ? 'RUNNING' : 'STOPPED',
+      port,
+      url: port ? `http://${req.hostname}:${port}` : null
+    });
+  } catch (e) {
+    if (e.statusCode === 404) {
+      res.json({ status: 'NOT_CREATED', port: null, url: null });
+    } else {
+      console.error(e);
+      res.status(500).json({ message: "Failed to check status" });
+    }
+  }
+});
+
+// POST Stop
+app.post("/admin/sessions/:token/container/stop", authenticateJWT, requireAdmin, async (req, res) => {
+  const { token } = req.params;
+  try {
+    const container = docker.getContainer(`session-${token}`);
+    await container.stop();
+    res.json({ message: "Container stopped" });
+  } catch (e) {
+    if (e.statusCode === 304) return res.json({ message: "Container already stopped" }); // 304 Not Modified often means state same
+    console.error(e);
+    res.status(500).json({ message: "Failed to stop container" });
+  }
+});
+
+// POST Start (Review Mode)
+app.post("/admin/sessions/:token/container/start", authenticateJWT, requireAdmin, async (req, res) => {
+  const { token } = req.params;
+  console.log(`Admin starting review container for ${token}`);
+
+  try {
+    // 1. Check if session exists & get ID
+    const sessionRes = await pool.query("SELECT id, status, assessment_id FROM sessions WHERE token = $1", [token]);
+    if (sessionRes.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionRes.rows[0];
+
+    // 2. Check if container exists
+    let container;
+    try {
+      container = docker.getContainer(`session-${token}`);
+      const info = await container.inspect();
+      if (!info.State.Running) {
+        await container.start();
+      }
+      const data = await container.inspect();
+      const port = data.NetworkSettings.Ports['8443/tcp'][0].HostPort;
+      return res.json({ status: 'RUNNING', port });
+    } catch (e) {
+      if (e.statusCode !== 404) throw e;
+      // Container not found, need to provision
+    }
+
+    // 3. Provisioning Logic
+    // Determine source files
+    const sessionHostPath = path.join("/tmp/interview-sessions", token);
+
+    // If COMPLETED, we must try to restore from Submission TAR
+    if (session.status === 'COMPLETED') {
+      const submissionPath = path.join(__dirname, "submissions", `${session.id}.tar`);
+      if (!fs.existsSync(submissionPath)) {
+        return res.status(400).json({ message: "Submission file not found. Cannot review code." });
+      }
+
+      // Ensure host path exists & clean it
+      fs.rmSync(sessionHostPath, { recursive: true, force: true });
+      fs.mkdirSync(sessionHostPath, { recursive: true });
+
+      // Extract
+      const { exec: execParams } = require('child_process');
+      await new Promise((resolve, reject) => {
+        execParams(`tar -xf "${submissionPath}" -C "${sessionHostPath}" --strip-components=1`, (err, stdout, stderr) => {
+          if (err) reject(err);
+          else resolve(stdout);
+        });
+      });
+
+      // Fix permissions
+      execSync(`chown -R 1000:1000 ${sessionHostPath}`);
+
+    } else {
+      // If NOT completed (e.g. debugging active session that died?), use regular provision logic
+      // But usually active sessions have containers. If removed, we might revert to assessment initial state 
+      // OR check if files exist in /tmp (if persistent).
+      // For Admin Review, let's assume if it is NOT completed, we just try to revive or start fresh.
+
+      // Simplest: Call existing provision function if not completed?
+      // But existing function creates new container.
+      // We'll replicate the create steps here.
+
+      if (!fs.existsSync(sessionHostPath)) {
+        // Copy from assessment
+        const sourcePath = path.join(__dirname, "assessment_files", String(session.assessment_id));
+        fs.cpSync(sourcePath, sessionHostPath, { recursive: true });
+        execSync(`chown -R 1000:1000 ${sessionHostPath}`);
+      }
+    }
+
+    // Create Container
+    container = await docker.createContainer({
+      Image: "custom-code-server:latest",
+      name: `session-${token}`,
+      Labels: { "com.assesy.session": token },
+      HostConfig: {
+        NetworkMode: "assesy_default_network",
+        Binds: [`${sessionHostPath}:/home/coder/project:rw`],
+        PortBindings: { "8443/tcp": [{ "HostPort": "" }] }
+      },
+      Env: [`SESSION_ID=${token}`],
+    });
+
+    await container.start();
+    const data = await container.inspect();
+    const port = data.NetworkSettings.Ports['8443/tcp'][0].HostPort;
+
+    res.json({ status: 'RUNNING', port });
+
+  } catch (error) {
+    console.error("Admin Start Container Error:", error);
+    res.status(500).json({ message: "Failed to start review environment" });
   }
 });
 
@@ -614,52 +1369,58 @@ app.post("/assessments/generate", authenticateJWT, async (req, res) => {
   }
 });
 
-function generateTestRunner(filename, testCases) {
-  const ext = path.extname(filename);
-  if (ext === '.py') {
-    return `
-if __name__ == "__main__":
-    test_cases = ${JSON.stringify(testCases)}
-    passed = 0
-    print("\\n--- Running Automated Tests ---")
-    for i, tc in enumerate(test_cases):
-        try:
-            result = solution(*tc["input"])
-            if result == tc["output"]:
-                print(f"Test {i+1}: PASS")
-                passed += 1
-            else:
-                print(f"Test {i+1}: FAIL (Expected {tc['output']}, Got {result})")
-        except Exception as e:
-            print(f"Test {i+1}: ERROR ({e})")
-    print(f"Total Passed: {passed}/{len(test_cases)}")
-`;
-  } else if (ext === '.js') {
-    return `
-// Test Runner
-(function() {
-    const testCases = ${JSON.stringify(testCases)};
-    let passed = 0;
-    console.log("\\n--- Running Automated Tests ---");
-    testCases.forEach((tc, i) => {
-        try {
-            const result = solution(...tc.input);
-            if (JSON.stringify(result) === JSON.stringify(tc.output)) {
-                console.log(\`Test \${i+1}: PASS\`);
-                passed++;
-            } else {
-                console.log(\`Test \${i+1}: FAIL (Expected \${JSON.stringify(tc.output)}, Got \${JSON.stringify(result)})\`);
-            }
-        } catch (e) {
-            console.log(\`Test \${i+1}: ERROR (\${e.message})\`);
-        }
-    });
-    console.log(\`Total Passed: \${passed}/\${testCases.length}\`);
-})();
-`;
+
+
+// Candidate Registration
+app.post("/session/:token/register", async (req, res) => {
+  const { token } = req.params;
+  const { name, email, details } = req.body; // details { qualification, course, college, year }
+
+  if (!name || !email) {
+    return res.status(400).json({ message: "Name and Email are required." });
   }
-  return '';
-}
+
+  try {
+    const sessionRes = await pool.query("SELECT id, status FROM sessions WHERE token = $1", [token]);
+    if (sessionRes.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionRes.rows[0];
+
+    if (session.status === 'COMPLETED') {
+      return res.status(403).json({ message: "Assessment already completed." });
+    }
+
+    // Update session
+    // Note: we might need to add an 'email' column if it doesn't exist, generic 'candidate_name' exists.
+    // For 'email', I'll just append it to candidate_name like "Name (email)" or check schema.
+    // Or better, add email column?
+    // Let's assume candidate_name holds "Name" and we maybe store email in metadata/details?
+    // Actually simpler: candidate_name = name. 
+    // And we map education details.
+
+    await pool.query(`
+            UPDATE sessions 
+            SET candidate_name = $1, 
+                education_qualification = $2, 
+                education_course = $3, 
+                education_college = $4, 
+                education_year = $5
+            WHERE id = $6
+        `, [
+      name,
+      details?.qualification,
+      details?.course,
+      details?.college,
+      details?.year,
+      session.id
+    ]);
+
+    res.json({ message: "Registration successful" });
+
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ message: "Failed to register candidate." });
+  }
+});
 
 app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
   const { title, jobDescription, questions, codingChallenge } = req.body;
@@ -667,8 +1428,8 @@ app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
   console.log("Received AI assessment save request:", { title, questionCount: questions?.length, hasCodingChallenge: !!codingChallenge });
 
   if (!title || !questions || !codingChallenge) {
-    console.error("Missing required fields:", { title: !!title, questions: !!questions, codingChallenge: !!codingChallenge });
-    return res.status(400).json({ message: "Missing required fields" });
+    console.error("Missing required fields for AI assessment:", { title: !!title, questions: !!questions, codingChallenge: !!codingChallenge });
+    return res.status(400).json({ message: "Missing required fields: title, questions, or codingChallenge." });
   }
 
   let client;
@@ -776,13 +1537,12 @@ app.post(
 
 app.get("/assessments", authenticateJWT, async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT id, title FROM assessments ORDER BY title ASC"
-    )
+    // Include questions for the view modal
+    const result = await pool.query("SELECT id, title, job_description, created_at, questions FROM assessments ORDER BY created_at DESC")
     res.json(result.rows)
-  } catch (e) {
-    console.error("Failed to fetch assessments:", e)
-    res.status(500).send("Failed to fetch assessments")
+  } catch (error) {
+    console.error("Fetch assessments error:", error)
+    res.status(500).json({ message: "Failed to fetch assessments" })
   }
 })
 
@@ -813,6 +1573,344 @@ app.get("/assessments/:id", authenticateJWT, async (req, res) => {
     res.status(500).send("Failed to fetch assessment details")
   }
 })
+
+// ========== Candidate Endpoints ==========
+
+// GET /session/:token - Get Public Session Info
+app.get("/session/:token", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT id, status, candidate_name, position, job_description, created_at, completed_at FROM sessions WHERE token = $1",
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    const session = result.rows[0];
+
+    // Check if valid
+    if (session.status === 'COMPLETED') {
+      return res.status(403).json({ message: "This assessment has already been completed." });
+    }
+
+    // Get question count
+    const qCount = await pool.query(
+      "SELECT COUNT(*) FROM session_questions WHERE session_id = $1 AND type != 'CODING'",
+      [session.id]
+    );
+
+    res.json({
+      ...session,
+      question_count: parseInt(qCount.rows[0].count)
+    });
+  } catch (error) {
+    console.error("Error fetching session:", error);
+    res.status(500).send("Error fetching session");
+  }
+});
+
+// POST /session/:token/answers - Submit MCQ/Blanks
+app.post("/session/:token/answers", async (req, res) => {
+  const { token } = req.params;
+  const { answers } = req.body; // { questionId: answer }
+
+  try {
+    const sessionResult = await pool.query("SELECT id FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const sessionId = sessionResult.rows[0].id;
+
+    // Save answers
+    // This assumes simple key-value storage. Real impl needs validation against correct answer.
+    // We'll store response and check correctness if we have correct_answer in DB
+    for (const [qId, ans] of Object.entries(answers)) {
+      // Fetch correct answer
+      const qResult = await pool.query("SELECT correct_answer FROM session_questions WHERE id = $1", [qId]);
+      let isCorrect = false;
+      if (qResult.rows.length > 0) {
+        const correct = qResult.rows[0].correct_answer;
+        if (correct && ans.toLowerCase().trim() === correct.toLowerCase().trim()) {
+          isCorrect = true;
+        }
+      }
+
+      await pool.query(
+        "INSERT INTO candidate_responses (session_id, question_id, response, is_correct) VALUES ($1, $2, $3, $4)",
+        [sessionId, qId, ans, isCorrect]
+      );
+    }
+
+    res.json({ message: "Answers saved" });
+  } catch (error) {
+    console.error("Error saving answers:", error);
+    res.status(500).send("Error saving answers");
+  }
+});
+
+// POST /session/:token/start - Provision Container
+app.post("/session/:token/start", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const sessionResult = await pool.query("SELECT id, assessment_id, status FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    // Check if container already running or provision new
+    let container = docker.getContainer(`session-${token}`);
+    try {
+      const info = await container.inspect();
+      if (!info.State.Running) {
+        await container.start();
+      }
+    } catch (e) {
+      if (e.statusCode === 304) {
+        console.log(`Container for session ${token} already started.`);
+      } else {
+        // Container doesn't exist, create it
+        await provisionInterviewContainer(token, session.assessment_id || session.id, !!session.assessment_id);
+      }
+    }
+
+    const url = `http://${token}.interview.localhost:8443/?folder=/home/coder/project`;
+
+    await pool.query("UPDATE sessions SET status = 'IN_PROGRESS', active_at = CURRENT_TIMESTAMP WHERE id = $1", [session.id]);
+
+    res.json({ url });
+  } catch (error) {
+    if (error.statusCode === 304) {
+      // Fallback catch for race conditions
+      const url = `http://${token}.interview.localhost:8443/?folder=/home/coder/project`;
+      return res.json({ url });
+    }
+
+    console.error("Error starting session:", error);
+    res.status(500).send("Error starting session");
+  }
+});
+
+
+// POST /session/:token/submit-workspace - Submit directly from Container
+app.post("/session/:token/submit-workspace", async (req, res) => {
+  const { token } = req.params;
+  console.log(`Received workspace submission for token ${token}`);
+
+  try {
+    const sessionResult = await pool.query("SELECT id, job_description, complexity FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    // Get Container
+    const container = docker.getContainer(`session-${token}`);
+
+    // Get Archive (Zip) of the project folder
+    // Note: This returns a stream of a TAR file, not ZIP. gradingService expects ZIP.
+    // We need to convert TAR to ZIP or update gradingService to handle TAR.
+    // Or, simpler: We use `docker cp` equivalent?
+    // Actually, `container.getArchive` returns a tar stream.
+    // Let's use `tar-stream` or just `adm-zip`? `adm-zip` doesn't do tar.
+
+    // Easier path: `exec` into container and `zip` the folder, then cat it?
+    // Requires `zip` installed in container.
+    // Let's check container default image. It's likely `codercom/code-server`.
+
+    // Fallback: We can just evaluate the files by reading them directly?
+    // `container.getArchive` is standard.
+    // Let's rely on `gradingService` updates to handle Buffers.
+    // Actually, since I am editing `gradingService` anyway, I can make it accept a TAR buffer?
+    // No, `adm-zip` is ZIP only.
+
+    // Let's stream the tar, and save it as `.tar`. Then for grading, we extract tar.
+    // I don't want to install tar library if I don't have to.
+    // Wait, the existing `submit` endpoint saves as `.zip`.
+
+    // Hack: Exec `zip -r submission.zip .` inside container, then `cat submission.zip`.
+    // If zip is not installed, we might fail.
+
+    const execZip = await container.exec({
+      Cmd: ['/bin/sh', '-c', 'zip -r /tmp/submission.zip . -x "node_modules/*" ".git/*"'],
+      WorkingDir: '/home/coder/project',
+      AttachStdout: true,
+      AttachStderr: true
+    });
+    const zipStream = await execZip.start();
+    // Wait for it? simpler:
+    // Just read the file using `getArchive` of the single zip file?
+    // Or just `cat` it.
+
+    // Let's try `cat`.
+    // NOTE: If zip is missing, this fails.
+
+    // Better Plan: Just use `getArchive` which gives a TAR.
+    // Update `gradingService.js` to handle TAR or just use `tar-fs` to extract it to a temp folder?
+    // Backend likely doesn't have `tar` package installed.
+    // `npm install tar`? I can't run npm install easily.
+
+    // What dependencies do I have? `fs`, `path`, `adm-zip`.
+    // I can stick to `adm-zip` if I can get a zip.
+    // Let's assume the container has `python3` (it does).
+    // I can use python to create a zip: `python3 -m zipfile -c /tmp/submission.zip .`
+
+    const createZipCmd = `python3 -c "import shutil; shutil.make_archive('/tmp/submission', 'zip', '/home/coder/project')"`;
+
+    // Run creation command
+    const execCreate = await container.exec({
+      Cmd: ['/bin/sh', '-c', createZipCmd],
+      AttachStdout: true,
+      AttachStderr: true
+    });
+    // We need to wait for this exec to finish. Docker modem exec start returns stream.
+    // Use generic docker `exec` helper or just wait a bit?
+    // The `dockerode` (or modem) `exec` flow is callback based usually or stream.
+    // A simpler way: Use `tar` via `getArchive` and use a system `tar` command on the HOST to extract it?
+    // The host is Linux. `tar` exists.
+
+    // OK Plan:
+    // 1. `container.getArchive({ path: '/home/coder/project' })` -> Stream.
+    // 2. Pipe Stream to `fs.createWriteStream('submission.tar')`.
+    // 3. Use Host's `tar -xf submission.tar -C extractDir` (using `child_process.exec`).
+    // 4. Then `gradingService` just points to that directory! (Refactor gradingService to take path instead of buffer).
+
+    const stream = await container.getArchive({ path: '/home/coder/project' });
+    const tarPath = path.join(__dirname, "submissions", `${session.id}.tar`);
+    const writeStream = fs.createWriteStream(tarPath);
+
+    await new Promise((resolve, reject) => {
+      stream.pipe(writeStream);
+      writeStream.on('finish', resolve); // Wait for flush
+      stream.on('error', reject);
+      writeStream.on('error', reject);
+    });
+
+    // Extract using host tar
+    const extractPath = path.join(__dirname, 'submissions', session.id.toString());
+    fs.mkdirSync(extractPath, { recursive: true });
+
+    const { exec: execParams } = require('child_process');
+    await new Promise((resolve, reject) => {
+      execParams(`tar -xf "${tarPath}" -C "${extractPath}"`, (err, stdout, stderr) => {
+        if (err) reject(err);
+        else resolve(stdout);
+      });
+    });
+
+    // Stop container
+    try {
+      await container.stop();
+    } catch (e) { console.warn("Container stop failed:", e.message); }
+
+    // Calculate Score (MCQ + AI Grade)
+    const mcqScoreRes = await pool.query(
+      "SELECT COUNT(*) as correct FROM candidate_responses WHERE session_id = $1 AND is_correct = TRUE",
+      [session.id]
+    );
+    const mcqScore = parseInt(mcqScoreRes.rows[0].correct) * 5;
+
+    // AI Grade
+    // Refactor gradingService to accept 'directoryPath'?
+    // OR just zip the directory using `adm-zip` and pass it?
+    // gradingService takes `zipBuffer`.
+    // I'll zip the folder on Host using AdmZip, then pass buffer.
+    const AdmZip = require('adm-zip');
+    const zip = new AdmZip();
+    zip.addLocalFolder(extractPath);
+    const zipBuffer = zip.toBuffer();
+
+    const gradeResult = await gradeSubmission(
+      session.id.toString(),
+      zipBuffer,
+      session.job_description,
+      session.complexity || 'Medium'
+    );
+
+    const totalScore = mcqScore + (gradeResult.score || 0);
+
+    // Update Session
+    // Only update Education fields if they are provided in this request (fallback to existing)
+    // Actually, since we removed the form, req.body.details might be empty.
+    // So we should NOT update education fields here, assuming they were set at registration.
+    // OR we use COALESCE in SQL but we are using node.
+    // Simple fix: Remove education updates from this query since they are done in /register
+
+    await pool.query(
+      `UPDATE sessions 
+       SET score = $1, status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, feedback = $2
+       WHERE id = $3`,
+      [
+        totalScore,
+        gradeResult,
+        session.id
+      ]
+    );
+
+    res.json({ message: "Assessment submitted successfully", score: totalScore, feedback: gradeResult });
+
+  } catch (error) {
+    console.error("Error submitting workspace:", error);
+    res.status(500).json({ message: "Error submitting workspace" });
+  }
+});
+
+// POST /session/:token/submit - Submit Coding Challenge (Legacy/Upload)
+app.post("/session/:token/submit", submissionUpload.single("code"), async (req, res) => {
+  const { token } = req.params;
+  const details = req.body.details ? JSON.parse(req.body.details) : {};
+
+  console.log(`Received submission for token ${token}`);
+
+  try {
+    const sessionResult = await pool.query("SELECT id, job_description, complexity FROM sessions WHERE token = $1", [token]);
+    if (sessionResult.rows.length === 0) return res.status(404).json({ message: "Session not found" });
+    const session = sessionResult.rows[0];
+
+    // Stop container
+    try {
+      const container = docker.getContainer(`session-${token}`);
+      await container.stop();
+      // await container.remove(); // Keep for review? Or remove to save resources. User wants "Post-Submission: Candidate link expires"
+    } catch (e) {
+      console.warn("Container stop failed or not found:", e.message);
+    }
+
+    // Save Zip
+    const zipPath = path.join(__dirname, "submissions", `${session.id}.zip`);
+    fs.writeFileSync(zipPath, req.file.buffer);
+
+    // Calculate Score (MCQ + AI Grade)
+    // 1. MCQ Score
+    const mcqScoreRes = await pool.query(
+      "SELECT COUNT(*) as correct FROM candidate_responses WHERE session_id = $1 AND is_correct = TRUE",
+      [session.id]
+    );
+    const mcqScore = parseInt(mcqScoreRes.rows[0].correct) * 5; // 5 points per question?
+
+    // 2. AI Grade for Code
+    const gradeResult = await gradeSubmission(
+      session.id.toString(),
+      req.file.buffer,
+      session.job_description,
+      session.complexity || 'Medium'
+    );
+
+    const totalScore = mcqScore + (gradeResult.score || 0);
+
+    // Update Session with Score and Feedback
+    await pool.query(
+      "UPDATE sessions SET score = $1, status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, feedback = $2 WHERE id = $3",
+      [totalScore, JSON.stringify(gradeResult), session.id]
+    );
+
+    console.log("Grading Complete:", gradeResult);
+
+    res.json({ message: "Submission received and graded." });
+
+  } catch (error) {
+    console.error("Error submitting:", error);
+    res.status(500).send("Error submitting");
+  }
+});
+
 
 app.delete("/assessments/:id", authenticateJWT, async (req, res) => {
   const client = await pool.connect()

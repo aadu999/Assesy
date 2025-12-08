@@ -1,4 +1,9 @@
 {
-  "watch": ["."],
-  "ignore": ["submissions/*", "node_modules/*"]
+  "ignore": [
+    "assessment_files/*",
+    "session_files/*",
+    "submissions/*",
+    "node_modules"
+  ],
+  "ext": "js,json"
 }

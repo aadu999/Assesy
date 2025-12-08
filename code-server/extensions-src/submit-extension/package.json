@@ -18,7 +18,7 @@
     "commands": [
       {
         "command": "interview.submitAssignment",
-        "title": "Submit Assignment",
+        "title": "Submit",
         "icon": {
           "light": "./icons/submit-light.svg",
           "dark": "./icons/submit-dark.svg"

@@ -11,14 +11,18 @@ services:
       - /app/node_modules
       # Mount host /tmp so session files can be accessed by dynamically created containers
       - /tmp/interview-sessions:/tmp/interview-sessions
+    env_file:
+      - ./backend/.env
     environment:
-      - DATABASE_URL=postgres://user:password@database:5432/interviewdb
+      - DB_HOST=database
+      - DB_PORT=5432
       - NODE_ENV=development
-      - GROQ_API_KEY=${GROQ_API_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`api.interview.localhost`)"
       - "traefik.http.services.backend-service.loadbalancer.server.port=3000"
+    ports:
+      - "3000:3000"
     networks:
       - default_network
     depends_on:
@@ -36,7 +40,7 @@ services:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=interviewdb
     ports:
-      - "5433:5432"
+      - "5432:5432" # Exposed on host port 5432 for local tools too
     networks:
       - default_network
     healthcheck:
@@ -45,32 +49,37 @@ services:
       timeout: 5s
       retries: 5
 
-  traefik:
-    image: traefik:v2.10
-    container_name: traefik-proxy
-    restart: unless-stopped
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-    ports:
-      - "80:80"
-      - "8081:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - default_network
+  # traefik:
+  #   image: traefik:v2.5
+  #   container_name: traefik-proxy
+  #   restart: unless-stopped
+  #   command:
+  #     - "--api.insecure=true"
+  #     - "--providers.docker=true"
+  #     - "--providers.docker.exposedbydefault=false"
+  #     - "--entrypoints.web.address=:80"
+  #   ports:
+  #     - "80:80"
+  #     - "8081:8080"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   networks:
+  #     - default_network
 
-  admin-frontend:
+  frontend:
     build:
-      context: ./admin-frontend
-    container_name: admin-frontend-service
+      context: ./frontend
+    container_name: frontend-service
     restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.admin.rule=Host(`admin.interview.localhost`)"
-      - "traefik.http.services.admin-service.loadbalancer.server.port=80"
+      - "traefik.http.routers.frontend.rule=Host(`interview.localhost`)"
+      - "traefik.http.services.frontend-service.loadbalancer.server.port=5173"
+    ports:
+      - "5173:5173"
     networks:
       - default_network
 

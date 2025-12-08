@@ -51,6 +51,13 @@ RUN if ls /home/coder/extensions-temp/*.vsix 1> /dev/null 2>&1; then \
     fi && \
     rm -rf /home/coder/extensions-temp
 
+# Install Marketplace Extensions (Python, Code Runner, Debuggers)
+RUN code-server --install-extension ms-python.python \
+    && code-server --install-extension formulahendry.code-runner \
+    && code-server --install-extension dbaeumer.vscode-eslint \
+    && code-server --install-extension esbenp.prettier-vscode
+
+
 USER root
 
 # Copy the entrypoint script and make it executable

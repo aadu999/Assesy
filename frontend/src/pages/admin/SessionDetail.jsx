@@ -135,6 +135,9 @@ const SessionDetail = () => {
                                     <div>
                                         <p className="font-medium text-slate-900">{resp.question_text}</p>
                                         <p className="text-sm text-slate-600 mt-1">Answer: <span className={resp.is_correct ? "text-green-700 font-medium" : "text-red-600 font-medium"}>{resp.response}</span></p>
+                                        {!resp.is_correct && (
+                                            <p className="text-sm text-green-700 mt-1">Correct Answer: <span className="font-medium">{resp.correct_answer}</span></p>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -213,7 +216,7 @@ const SessionDetail = () => {
                         <div className="space-y-3 text-sm">
                             <div>
                                 <label className="text-slate-500 block mb-1">Email / Contact</label>
-                                <p className="font-medium text-slate-900">candidate@example.com</p>
+                                <p className="font-medium text-slate-900">{session.candidate_email || "N/A"}</p>
                             </div>
                             <div>
                                 <label className="text-slate-500 block mb-1">Started At</label>

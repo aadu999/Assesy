@@ -3,32 +3,57 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
-async function gradeSubmission(sessionId, zipBuffer, jobDescription, complexity) {
+const { execSync } = require('child_process');
+
+async function gradeSubmission(sessionId, submissionPath, jobDescription, complexity) {
     console.log(`Grading submission for session ${sessionId}...`);
 
-    // 1. Extract Code
-    const extractPath = path.join(__dirname, 'submissions', sessionId);
+    // 1. Extract Code (Handling Tar)
+    const extractPath = path.join(__dirname, 'temp_grading', sessionId);
     fs.mkdirSync(extractPath, { recursive: true });
 
-    const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(extractPath, true);
-
-    // 2. Find solution file (heuristic)
-    const files = fs.readdirSync(extractPath);
-    const codeFile = files.find(f => f.endsWith('.py') || f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.c') || f.endsWith('.cpp'));
-
-    if (!codeFile) {
-        return { score: 0, feedback: "No code file found." };
+    try {
+        // Extract tarball using system tar
+        // submissionPath is the absolute path to the .tar file
+        execSync(`tar -xf "${submissionPath}" -C "${extractPath}"`);
+    } catch (e) {
+        console.error("Failed to extract submission tar:", e);
+        return { score: 0, feedback: "Failed to extract code submission." };
     }
 
-    const codeContent = fs.readFileSync(path.join(extractPath, codeFile), 'utf-8');
+    // 2. Find solution file (heuristic)
+    // We need to search recursively because it might be nested
+    function findCodeFile(dir) {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                const found = findCodeFile(fullPath);
+                if (found) return found;
+            } else if (entry.isFile()) {
+                if (entry.name.endsWith('.py') || entry.name.endsWith('.js') || entry.name.endsWith('.ts') || entry.name.endsWith('.c') || entry.name.endsWith('.cpp') || entry.name.endsWith('.java')) {
+                    return fullPath;
+                }
+            }
+        }
+        return null;
+    }
+
+    const codeFilePath = findCodeFile(extractPath);
+
+    if (!codeFilePath) {
+        return { score: 0, feedback: "No code file found in submission." };
+    }
+
+    const codeContent = fs.readFileSync(codeFilePath, 'utf-8');
+    const codeFileName = path.basename(codeFilePath);
 
     // 3. AI Evaluation
     const prompt = `
     You are an expert code reviewer. Evaluate the following coding submission for a ${complexity} level role ("${jobDescription}").
 
     CODE SUBMISSION:
-    \`\`\`${codeFile.endsWith('.py') ? 'python' : codeFile.endsWith('.c') ? 'c' : 'javascript'}
+    \`\`\`${codeFileName.endsWith('.py') ? 'python' : codeFileName.endsWith('.c') ? 'c' : 'javascript'}
     ${codeContent}
     \`\`\`
 
@@ -44,7 +69,8 @@ async function gradeSubmission(sessionId, zipBuffer, jobDescription, complexity)
         "feedback": "Detailed feedback...",
         "strengths": ["...", "..."],
         "weaknesses": ["...", "..."],
-        "bug_report": "List of potential bugs if any"
+        "bug_report": "List of potential bugs if any",
+        "brief_note": "A short summary (2-3 sentences) of the overall code quality and submission status."
     }
     `;
 

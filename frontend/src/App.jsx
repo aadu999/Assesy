@@ -7,11 +7,12 @@ import Assessments from './pages/admin/Assessments';
 import UsersPage from './pages/admin/Users';
 import SessionsPage from './pages/admin/Sessions';
 import SessionDetail from './pages/admin/SessionDetail';
-import SettingsPage from './pages/admin/Settings';
+import Settings from './pages/admin/Settings';
 import Welcome from './pages/candidate/Welcome';
 import CandidateRegistration from './pages/candidate/CandidateRegistration';
 import AssessmentQuestions from './pages/candidate/AssessmentQuestions';
 import CodingEnvironment from './pages/candidate/CodingEnvironment';
+import AssessmentComplete from './pages/candidate/AssessmentComplete';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -40,7 +41,7 @@ function AppRoutes() {
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="submissions" element={<SessionsPage />} />
         <Route path="sessions/:token" element={<SessionDetail />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings" element={<Settings />} />
         {/* Further routes will be added here */}
       </Route>
 
@@ -48,6 +49,7 @@ function AppRoutes() {
       <Route path="/assessment/:token/register" element={<CandidateRegistration />} />
       <Route path="/assessment/:token/questions" element={<AssessmentQuestions />} />
       <Route path="/assessment/:token/coding" element={<CodingEnvironment />} />
+      <Route path="/assessment/complete" element={<AssessmentComplete />} />
 
       <Route path="/dashboard" element={
         <ProtectedRoute>

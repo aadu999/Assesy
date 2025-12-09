@@ -38,14 +38,49 @@ Deploying Assesy is a straightforward process, thanks to its containerized archi
 1.  **Build the services:** From the root of the project directory, run the following command to build all the necessary Docker images:
 
     ```bash
-    docker-compose build
+    docker compose build
     ```
 
-2.  **Start the application:** Once the build process is complete, you can launch the entire platform with a single command:
+2.  **Start the application:** You can use the provided startup script which handles cloudflare tunnels automatically:
 
     ```bash
-    docker-compose up -d
+    ./start.sh
     ```
+
+    Or use docker-compose directly:
+
+    ```bash
+    docker compose up -d
+    ```
+
+3.  **Stop the application:** To stop all services including any running tunnels:
+
+    ```bash
+    ./stop.sh
+    ```
+
+#### **Cloudflare Tunnel Configuration (Optional)**
+
+For testing purposes, you can enable cloudflared tunnels to expose your local application to the internet:
+
+1.  **Install cloudflared** (if not already installed):
+    ```bash
+    wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+    sudo dpkg -i cloudflared-linux-amd64.deb
+    ```
+
+2.  **Enable tunnels**: Edit `.env.tunnel` in the project root and set:
+    ```bash
+    ENABLE_CLOUDFLARE_TUNNEL=true
+    ```
+
+3.  **Start with tunnels**: Run `./start.sh` and the script will automatically:
+    - Start cloudflared tunnels for frontend (port 5173) and backend (port 3000)
+    - Display the public URLs
+    - Launch docker-compose services
+
+4.  **Update URLs**: Copy the displayed tunnel URLs and paste them in the admin settings panel at `http://localhost:5173/settings`
+
 
 #### **Accessing the Platform**
 

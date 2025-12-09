@@ -1,42 +1,67 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import api from '../../services/api';
 
 const CodingEnvironment = () => {
     const { token } = useParams();
     const [iframeUrl, setIframeUrl] = useState('');
+
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const [retryCount, setRetryCount] = useState(0);
+    const MAX_RETRIES = 3;
 
     useEffect(() => {
-        // Provision container and get URL
+        let mounted = true;
+
         const startSession = async () => {
-            try {
-                // This could be a new endpoint or piggyback on existing
-                // Backend creates container and returns subdomain URL
-                // Check backend provision logic
-                // Assuming POST /sessions/:token/start returns url
-                const response = await api.post(`/session/${token}/start`);
-                // Append file arg to open README by default
-                let url = response.data.url;
-                if (url.includes('?')) url += '&file=README.md';
-                else url += '?file=README.md';
+            let attempt = 0;
+            let success = false;
 
-                // Add delay to allow container services to boot
-                await new Promise(r => setTimeout(r, 5000));
+            while (attempt < MAX_RETRIES && !success && mounted) {
+                try {
+                    setLoading(true);
 
-                setIframeUrl(url);
-            } catch (err) {
-                console.error("Failed to start session:", err);
-                if (err.response?.status === 403) {
-                    alert("Session expired or completed.");
-                    window.location.href = "/";
+                    // Provision container
+                    const response = await api.post(`/session/${token}/start`);
+                    let url = response.data.url;
+                    if (url.includes('?')) url += '&file=README.md';
+                    else url += '?file=README.md';
+
+                    // 5-second buffer for container boot
+                    await new Promise(r => setTimeout(r, 5000));
+
+                    if (mounted) {
+                        setIframeUrl(url);
+                        success = true;
+                    }
+                } catch (err) {
+                    console.error(`Attempt ${attempt + 1} failed:`, err);
+
+                    if (err.response?.status === 403) {
+                        alert("Session expired or completed.");
+                        window.location.href = "/";
+                        return;
+                    }
+
+                    attempt++;
+                    if (mounted) setRetryCount(attempt);
+
+                    // Wait before retry (2s)
+                    if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000));
                 }
-            } finally {
-                setLoading(false);
             }
+
+            if (!success && mounted) {
+                setError("We couldn't connect to your coding environment. This might be due to a firewall or temporary server load. Please try refreshing.");
+            }
+            if (mounted) setLoading(false);
         };
+
         startSession();
+        return () => { mounted = false; };
     }, [token]);
 
     const [testOutput, setTestOutput] = useState('');
@@ -59,16 +84,13 @@ const CodingEnvironment = () => {
     const [showSubmitModal, setShowSubmitModal] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
+    const navigate = useNavigate();
+
     const handleFinalSubmit = async () => {
         setSubmitting(true);
         try {
-            // Details are already collected at registration
             await api.post(`/session/${token}/submit-workspace`, { details: {} });
-
-            alert("Assessment Submitted Successfully! You may close this window.");
-            window.close();
-            // Fallback for browsers preventing window.close()
-            window.location.href = "/assessment/complete";
+            navigate("/assessment/complete");
         } catch (err) {
             console.error(err);
             alert("Submission failed. Please try again.");
@@ -81,16 +103,46 @@ const CodingEnvironment = () => {
         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4">
             <Loader2 className="w-12 h-12 animate-spin text-blue-500" />
             <div className="text-center">
-                <h2 className="text-xl font-bold">{loading ? "Setting up Dev Environment..." : "Starting Code Server..."}</h2>
+                <h2 className="text-xl font-bold">{loading ? (retryCount > 0 ? `Connecting... (Attempt ${retryCount + 1}/3)` : "Setting up Dev Environment...") : "Starting Code Server..."}</h2>
                 <p className="text-slate-400 mt-2 max-w-sm">
-                    {loading ? "Allocating a private coding container for you." : "Container is ready. Waiting for VS Code (code-server) to launch. This usually takes 10-15 seconds."}
+                    {loading ? "Allocating a private coding container for you." : "Container is ready. Waiting for VS Code (code-server) to launch."}
                 </p>
                 {loading && <p className="text-xs text-slate-600 mt-4">If this takes longer than 1 minute, refresh.</p>}
             </div>
         </div>
     );
 
-    if (!iframeUrl) return <div className="min-h-screen flex items-center justify-center">Failed to load environment.</div>;
+
+
+    // ... render methods ...
+    if (error) return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-6">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-2">
+                <Loader2 className="w-8 h-8 text-red-500" />
+                {/* Actually use X or AlertTriangle */}
+            </div>
+            <div className="text-center max-w-md px-4">
+                <h2 className="text-2xl font-bold mb-2">Connection Timeout</h2>
+                <p className="text-slate-400 mb-6">{error}</p>
+                <div className="flex gap-4 justify-center">
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors"
+                    >
+                        Retry Connection
+                    </button>
+                    <a
+                        href="/"
+                        className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-colors"
+                    >
+                        Back to Home
+                    </a>
+                </div>
+            </div>
+        </div>
+    );
+
+    if (!iframeUrl) return null; // Should be handled by error or loading states
 
     return (
         <div className="w-full h-screen bg-black flex flex-col">

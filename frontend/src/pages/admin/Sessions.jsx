@@ -12,10 +12,24 @@ const SessionsPage = () => {
     const [newSession, setNewSession] = useState({ candidateName: '', position: '', assessmentId: '' });
     const [error, setError] = useState(null);
 
+    const [publicUrl, setPublicUrl] = useState('');
+
     useEffect(() => {
         fetchSessions();
         fetchAssessments();
+        fetchSettings();
     }, []);
+
+    const fetchSettings = async () => {
+        try {
+            const res = await api.get('/admin/settings');
+            if (res.data.public_url_candidate) {
+                setPublicUrl(res.data.public_url_candidate.replace(/\/$/, '')); // trim trailing slash
+            }
+        } catch (e) {
+            console.error("Failed to fetch settings", e);
+        }
+    };
 
     const [toast, setToast] = useState(null);
 
@@ -53,8 +67,10 @@ const SessionsPage = () => {
             setNewSession({ candidateName: '', position: '', assessmentId: '' });
             fetchSessions();
 
-            // Show success toast with link
-            const link = `${window.location.origin}/assessment/${res.data.token}`;
+            // Use configured public URL or fallback to window.origin
+            const baseUrl = publicUrl || window.location.origin;
+            const link = `${baseUrl}/assessment/${res.data.token}`;
+
             showToast(`Session created! Link: ${link}`);
             // Also copy to clipboard automatically
             navigator.clipboard.writeText(link);
@@ -64,7 +80,8 @@ const SessionsPage = () => {
     };
 
     const copyLink = (token) => {
-        const link = `${window.location.origin}/assessment/${token}`;
+        const baseUrl = publicUrl || window.location.origin;
+        const link = `${baseUrl}/assessment/${token}`;
         navigator.clipboard.writeText(link);
         showToast("Link copied to clipboard!");
     };

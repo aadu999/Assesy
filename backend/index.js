@@ -12,8 +12,22 @@ const { generateAssessment, generateSessionQuestions } = require("./groqService"
 const { gradeSubmission } = require("./gradingService")
 
 
+// Helper to get public URL
+async function getPublicUrl(pool) {
+  try {
+    const res = await pool.query("SELECT value FROM admin_settings WHERE key = 'public_url_candidate'");
+    if (res.rows.length > 0) return res.rows[0].value;
+  } catch (e) {
+    console.error("Failed to fetch public URL:", e);
+  }
+  return "http://localhost:5173"; // Default fallback
+}
+
+
+
 const app = express()
-const port = 3000
+
+const PORT = 3000;
 const docker = new Docker()
 const JWT_SECRET = "your-super-secret-and-long-key-for-jwt"
 
@@ -39,7 +53,27 @@ const pool = new Pool({
   database: "interviewdb",
   password: "password",
   port: process.env.DB_PORT || 5432,
-})
+});
+
+// DB Connection Logic - Migration Hook
+(async () => {
+  try {
+    const client = await pool.connect();
+    // Add candidate_email column if missing
+    await client.query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS candidate_email TEXT");
+    console.log("DB Migration: ensuring candidate_email column exists.");
+    client.release();
+  } catch (e) {
+    console.error("Migration Error:", e);
+  }
+
+  // Create Settings Table
+  try {
+    const client = await pool.connect();
+    await client.query("CREATE TABLE IF NOT EXISTS admin_settings (key TEXT PRIMARY KEY, value TEXT)");
+    client.release();
+  } catch (e) { console.error("Settings Table Error:", e); }
+})();
 
 // Track provisioning sessions to prevent race conditions
 const provisioningLocks = new Map()
@@ -530,6 +564,102 @@ app.get("/assessments", authenticateJWT, async (req, res) => {
   }
 })
 
+// Generate Assessment with AI
+app.post("/assessments/generate", authenticateJWT, async (req, res) => {
+  const { jobDescription } = req.body;
+  if (!jobDescription) {
+    return res.status(400).json({ message: "Job description is required" });
+  }
+
+  try {
+    const assessmentData = await generateAssessment(jobDescription);
+    res.json(assessmentData);
+  } catch (error) {
+    console.error("AI Generation Error:", error);
+    res.status(500).json({ message: "Failed to generate assessment" });
+  }
+});
+
+// Save AI Generated Assessment
+app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
+  const { title, jobDescription, questions, codingChallenge } = req.body;
+
+  if (!title || !questions) {
+    return res.status(400).json({ message: "Title and questions are required" });
+  }
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Create Assessment
+      const assessmentResult = await client.query(
+        "INSERT INTO assessments (title, job_description, created_by) VALUES ($1, $2, $3) RETURNING id",
+        [title, jobDescription, req.user.id]
+      );
+      const assessmentId = assessmentResult.rows[0].id;
+
+      // 2. Insert Questions
+      for (const q of questions) {
+        await client.query(
+          "INSERT INTO questions (assessment_id, type, question_text, options, correct_answer) VALUES ($1, $2, $3, $4, $5)",
+          [
+            assessmentId,
+            q.type,
+            q.question_text,
+            q.options ? JSON.stringify(q.options) : null,
+            q.correct_answer
+          ]
+        );
+      }
+
+      // 3. Insert Coding Challenge (as a Question of type CODING)
+      if (codingChallenge) {
+        // Save files to disk
+        const assessmentPath = path.join(__dirname, "assessment_files", assessmentId.toString());
+        fs.mkdirSync(assessmentPath, { recursive: true });
+
+        const fileExt = codingChallenge.filename.endsWith('.py') ? '.py' : '.js';
+        let testRunner = '';
+
+        if (fileExt === '.py') {
+          testRunner = `\nif __name__ == "__main__":\n    test_cases = ${JSON.stringify(codingChallenge.test_cases, null, 4)}\n    passed = 0\n    print("\\n--- Running ${codingChallenge.test_cases.length} Test Cases ---")\n    for i, tc in enumerate(test_cases):\n        try:\n            result = solution(*tc["input"])\n            if result == tc["output"]:\n                print(f"Test {i+1}: PASS ✓")\n                passed += 1\n            else:\n                print(f"Test {i+1}: FAIL ✗ (Expected {tc['output']}, Got {result})")\n        except Exception as e:\n            print(f"Test {i+1}: ERROR - {e}")\n    print(f"\\nTotal: {passed}/{len(test_cases)} passed")`;
+        } else {
+          testRunner = `\n// Test Runner\n(function() {\n    const testCases = ${JSON.stringify(codingChallenge.test_cases, null, 4)};\n    let passed = 0;\n    console.log("\\n--- Running ${codingChallenge.test_cases.length} Test Cases ---");\n    testCases.forEach((tc, i) => {\n        try {\n            const result = solution(...tc.input);\n            if (JSON.stringify(result) === JSON.stringify(tc.output)) {\n                console.log(\`Test \${i+1}: PASS ✓\`);\n                passed++;\n            } else {\n                console.log(\`Test \${i+1}: FAIL ✗ (Expected \${JSON.stringify(tc.output)}, Got \${JSON.stringify(result)})\`);\n            }\n        } catch (e) {\n            console.log(\`Test \${i+1}: ERROR - \${e.message}\`);\n        }\n    });\n    console.log(\`\\nTotal: \${passed}/\${testCases.length} passed\`);\n})();`;
+        }
+
+        fs.writeFileSync(path.join(assessmentPath, codingChallenge.filename), codingChallenge.template_code + testRunner);
+
+        const readme = `# ${codingChallenge.title}\n\n## Description\n\n${codingChallenge.description}\n\n## Constraints\n\n${codingChallenge.constraints?.map(c => `- ${c}`).join('\n') || 'None'}\n\n## Examples\n\n${codingChallenge.examples?.map((ex, i) => `### Example ${i + 1}\n\n**Input:** ${ex.input}\n**Output:** ${ex.output}\n**Explanation:** ${ex.explanation}\n`).join('\n') || 'None'}`;
+        fs.writeFileSync(path.join(assessmentPath, "README.md"), readme);
+
+        // Store metadata in DB
+        await client.query(
+          "INSERT INTO questions (assessment_id, type, question_text, correct_answer) VALUES ($1, 'CODING', $2, $3)",
+          [assessmentId, codingChallenge.title, JSON.stringify({
+            description: codingChallenge.description,
+            filename: codingChallenge.filename,
+            // Store other metadata if needed, usually just title/description is enough for list
+            // But for execution we need files, which we just saved.
+          })]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json({ message: "Assessment created successfully", id: assessmentId });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Create AI Assessment Error:", error);
+    res.status(500).json({ message: "Failed to create assessment" });
+  }
+});
+
 // Delete Assessment
 app.delete("/assessments/:id", authenticateJWT, requireAdmin, async (req, res) => {
   try {
@@ -587,13 +717,45 @@ app.post("/sessions", authenticateJWT, async (req, res) => {
       "INSERT INTO sessions (token, status, candidate_name, position, assessment_id) VALUES ($1, $2, $3, $4, $5)",
       [token, "CREATED", candidateName, position, assessmentId]
     )
-    const shareableLink = `http://api.interview.localhost/session/${token}`
+    const baseUrl = await getPublicUrl(pool);
+    const shareableLink = `${baseUrl}/assessment/${token}`
     res.status(201).json({ shareableLink })
   } catch (error) {
     console.error("Failed to create session:", error)
     res.status(500).send("Failed to create session.")
   }
 })
+
+// Admin Settings Endpoints
+app.get("/admin/settings", authenticateJWT, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT key, value FROM admin_settings");
+    const settings = {};
+    result.rows.forEach(row => {
+      settings[row.key] = row.value;
+    });
+    res.json(settings);
+  } catch (error) {
+    console.error("Fetch settings error:", error);
+    res.status(500).json({ message: "Failed to fetch settings" });
+  }
+});
+
+app.post("/admin/settings", authenticateJWT, requireAdmin, async (req, res) => {
+  const { key, value } = req.body;
+  try {
+    if (key && value !== undefined) {
+      await pool.query(
+        "INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+        [key, value]
+      );
+    }
+    res.json({ message: "Settings updated" });
+  } catch (error) {
+    console.error("Update settings error:", error);
+    res.status(500).json({ message: "Failed to update settings" });
+  }
+});
 
 app.post("/sessions/generate-ai", authenticateJWT, async (req, res) => {
   const { candidateName, position, jobDescription, complexity } = req.body;
@@ -675,7 +837,7 @@ app.post("/sessions/generate-ai", authenticateJWT, async (req, res) => {
       fs.writeFileSync(path.join(sessionPath, "README.md"), readme);
     }
 
-    const shareableLink = `http://api.interview.localhost/session/${token}`;
+    const shareableLink = `${await getPublicUrl(pool)}/assessment/${token}`;
     res.status(201).json({
       shareableLink,
       token,
@@ -838,9 +1000,12 @@ app.post("/session/:token/start", async (req, res) => {
     const performInspect = await container.inspect();
     const hostPort = performInspect.NetworkSettings.Ports['8443/tcp'][0].HostPort;
 
-    // Return localhost URL
-    // Note: In production this would be a real domain
+    // Note: Code-server always uses localhost because Cloudflare tunnels
+    // only expose specific ports (3000, 5173). Dynamic code-server ports
+    // cannot be accessed through the tunnel without a reverse proxy.
+    // For tunnel mode: admin accesses via tunnel, code-server via localhost
     const url = `http://localhost:${hostPort}/?folder=/home/coder/project`;
+
     res.json({ url });
 
   } catch (error) {
@@ -1044,6 +1209,7 @@ app.get("/admin/sessions/:token/result", authenticateJWT, async (req, res) => {
     const sessionResult = await pool.query(`
             SELECT 
                 s.*, 
+                s.candidate_email,
                 a.title as assessment_title 
             FROM sessions s
             LEFT JOIN assessments a ON s.assessment_id = a.id
@@ -1099,6 +1265,32 @@ app.get("/admin/sessions/:token/result", authenticateJWT, async (req, res) => {
   }
 });
 
+// --- Admin Settings API ---
+app.get("/admin/settings", authenticateJWT, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM admin_settings");
+    const settings = {};
+    result.rows.forEach(r => settings[r.key] = r.value);
+    res.json(settings);
+  } catch (e) {
+    res.status(500).json({ message: "Failed to fetch settings" });
+  }
+});
+
+app.post("/admin/settings", authenticateJWT, async (req, res) => {
+  const { key, value } = req.body;
+  try {
+    await pool.query(
+      "INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+      [key, value]
+    );
+    res.json({ message: "Setting updated" });
+  } catch (e) {
+    res.status(500).json({ message: "Failed to save setting" });
+  }
+});
+
+// --- File Upload ---
 // GET Download Submission
 app.get("/admin/sessions/:token/download", authenticateJWT, requireAdmin, async (req, res) => {
   const { token } = req.params;
@@ -1400,13 +1592,15 @@ app.post("/session/:token/register", async (req, res) => {
     await pool.query(`
             UPDATE sessions 
             SET candidate_name = $1, 
-                education_qualification = $2, 
-                education_course = $3, 
-                education_college = $4, 
-                education_year = $5
-            WHERE id = $6
+                candidate_email = $2,
+                education_qualification = $3, 
+                education_course = $4, 
+                education_college = $5, 
+                education_year = $6
+            WHERE id = $7
         `, [
       name,
+      email,
       details?.qualification,
       details?.course,
       details?.college,
@@ -1421,6 +1615,55 @@ app.post("/session/:token/register", async (req, res) => {
     res.status(500).json({ message: "Failed to register candidate." });
   }
 });
+
+// Helper to generate test runner code based on language
+function generateTestRunner(filename, testCases) {
+  const path = require('path');
+  const ext = path.extname(filename);
+  if (ext === '.py') {
+    return `
+if __name__ == "__main__":
+    test_cases = ${JSON.stringify(testCases)}
+    passed = 0
+    print("\\n--- Running Automated Tests ---")
+    for i, tc in enumerate(test_cases):
+        try:
+            result = solution(*tc["input"])
+            if result == tc["output"]:
+                print(f"Test {i+1}: PASS")
+                passed += 1
+            else:
+                print(f"Test {i+1}: FAIL (Expected {tc['output']}, Got {result})")
+        except Exception as e:
+            print(f"Test {i+1}: ERROR ({e})")
+    print(f"Total Passed: {passed}/{len(test_cases)}")
+`;
+  } else if (ext === '.js') {
+    return `
+// Test Runner
+(function() {
+    const testCases = ${JSON.stringify(testCases)};
+    let passed = 0;
+    console.log("\\n--- Running Automated Tests ---");
+    testCases.forEach((tc, i) => {
+        try {
+            const result = solution(...tc.input);
+            if (JSON.stringify(result) === JSON.stringify(tc.output)) {
+                console.log(\`Test \${i+1}: PASS\`);
+                passed++;
+            } else {
+                console.log(\`Test \${i+1}: FAIL (Expected \${JSON.stringify(tc.output)}, Got \${JSON.stringify(result)})\`);
+            }
+        } catch (e) {
+            console.log(\`Test \${i+1}: ERROR (\${e.message})\`);
+        }
+    });
+    console.log(\`Total Passed: \${passed}/\${testCases.length}\`);
+})();
+`;
+  }
+  return '';
+}
 
 app.post("/assessments/create-ai", authenticateJWT, async (req, res) => {
   const { title, jobDescription, questions, codingChallenge } = req.body;
@@ -1808,18 +2051,10 @@ app.post("/session/:token/submit-workspace", async (req, res) => {
     const mcqScore = parseInt(mcqScoreRes.rows[0].correct) * 5;
 
     // AI Grade
-    // Refactor gradingService to accept 'directoryPath'?
-    // OR just zip the directory using `adm-zip` and pass it?
-    // gradingService takes `zipBuffer`.
-    // I'll zip the folder on Host using AdmZip, then pass buffer.
-    const AdmZip = require('adm-zip');
-    const zip = new AdmZip();
-    zip.addLocalFolder(extractPath);
-    const zipBuffer = zip.toBuffer();
-
+    // gradingService refactored to accept tar path directly.
     const gradeResult = await gradeSubmission(
       session.id.toString(),
-      zipBuffer,
+      tarPath,
       session.job_description,
       session.complexity || 'Medium'
     );
@@ -1837,14 +2072,10 @@ app.post("/session/:token/submit-workspace", async (req, res) => {
       `UPDATE sessions 
        SET score = $1, status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, feedback = $2
        WHERE id = $3`,
-      [
-        totalScore,
-        gradeResult,
-        session.id
-      ]
+      [totalScore, JSON.stringify(gradeResult), session.id]
     );
 
-    res.json({ message: "Assessment submitted successfully", score: totalScore, feedback: gradeResult });
+    res.json({ message: "Submission evaluated successfully", score: totalScore, feedback: gradeResult });
 
   } catch (error) {
     console.error("Error submitting workspace:", error);
@@ -2549,8 +2780,8 @@ app.post(
   }
 )
 
-app.listen(port, () => {
-  console.log(`Backend service listening on port ${port}`)
+app.listen(PORT, () => {
+  console.log(`Backend service listening on port ${PORT}`)
   initializeDatabase().then(() => {
     // Initialize multi-provider AI service
     const { initializeAIService } = require("./groqService");

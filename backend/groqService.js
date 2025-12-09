@@ -1,11 +1,11 @@
 const Groq = require("groq-sdk");
 
 const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY || "your-api-key-here",
+  apiKey: process.env.GROQ_API_KEY || "your-api-key-here",
 });
 
 async function generateAssessment(jobDescription) {
-    const prompt = `
+  const prompt = `
     You are an expert technical interviewer. Create a technical assessment for the following job description:
     "${jobDescription}"
 
@@ -48,52 +48,47 @@ async function generateAssessment(jobDescription) {
     4. Do not include any markdown formatting (like \\\`\\\`\\\`json). Just the raw JSON string.
   `;
 
-    try {
-        console.log("Calling Groq API for job description:", jobDescription);
-        const completion = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: "user",
-                    content: prompt,
-                },
-            ],
-            model: "llama-3.3-70b-versatile",
-            temperature: 0.5,
-            response_format: { type: "json_object" },
-        });
+  try {
+    console.log("Calling AI Service for job description:", jobDescription);
 
-        const content = completion.choices[0].message.content;
-        console.log("Groq API Response Content:", content);
-        const parsed = JSON.parse(content);
-        console.log("Successfully parsed JSON response");
-        return parsed;
-    } catch (error) {
-        console.error("Error generating assessment with Groq:");
-        console.error("Error message:", error.message);
-        console.error("Error stack:", error.stack);
-        if (error.response) {
-            console.error("Groq API Error Data:", error.response.data);
-            console.error("Groq API Error Status:", error.response.status);
-        }
-        throw error;
+    // Use generic AI service if available
+    let content;
+    if (aiService) {
+      const result = await aiService.generateCompletion(prompt, { temperature: 0.5 });
+      // aiService returns parsed JSON usually, but let's be safe
+      return result;
+    } else {
+      // Fallback
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.5,
+        response_format: { type: "json_object" },
+      });
+      content = completion.choices[0].message.content;
+      return JSON.parse(content);
     }
+  } catch (error) {
+    console.error("Error generating assessment:", error.message);
+    throw error;
+  }
 }
 
 // Helper function to get question counts based on complexity
 function getQuestionCounts(complexity) {
-    switch (complexity) {
-        case 'Easy': return { mcq: 3, fillBlank: 2, testCases: 5 };
-        case 'Medium': return { mcq: 4, fillBlank: 2, testCases: 7 };
-        case 'Hard': return { mcq: 5, fillBlank: 3, testCases: 10 };
-        default: return { mcq: 4, fillBlank: 2, testCases: 7 };
-    }
+  switch (complexity) {
+    case 'Easy': return { mcq: 3, fillBlank: 2, testCases: 5 };
+    case 'Medium': return { mcq: 4, fillBlank: 2, testCases: 7 };
+    case 'Hard': return { mcq: 5, fillBlank: 3, testCases: 10 };
+    default: return { mcq: 4, fillBlank: 2, testCases: 7 };
+  }
 }
 
 // Enhanced function for per-session question generation
 async function generateSessionQuestions(jobDescription, complexity = 'Medium') {
-    const counts = getQuestionCounts(complexity);
+  const counts = getQuestionCounts(complexity);
 
-    const prompt = `
+  const prompt = `
 You are an expert technical interviewer. Generate a ${complexity} difficulty assessment for: "${jobDescription}"
 
 REQUIREMENTS:
@@ -169,32 +164,36 @@ Return STRICTLY valid JSON (no markdown, no backticks):
 CRITICAL: Provide EXACTLY ${counts.testCases} test cases, no more, no less.
   `;
 
-    try {
-        console.log(`Generating ${complexity} assessment for: ${jobDescription}`);
-        const completion = await groq.chat.completions.create({
-            messages: [{ role: "user", content: prompt }],
-            model: "llama-3.3-70b-versatile",
-            temperature: 0.7, // Higher for more variety
-            response_format: { type: "json_object" },
-        });
+  try {
+    console.log(`Generating ${complexity} assessment for: ${jobDescription}`);
 
-        const content = completion.choices[0].message.content;
-        const parsed = JSON.parse(content);
-
-        // Validate test case count
-        if (parsed.coding_challenge && parsed.coding_challenge.test_cases) {
-            const actualCount = parsed.coding_challenge.test_cases.length;
-            if (actualCount !== counts.testCases) {
-                console.warn(`Expected ${counts.testCases} test cases, got ${actualCount}. Adjusting...`);
-            }
-        }
-
-        console.log(`Successfully generated ${complexity} assessment with ${parsed.questions?.length || 0} questions`);
-        return parsed;
-    } catch (error) {
-        console.error("Error generating session questions:", error.message);
-        throw error;
+    let parsed;
+    if (aiService) {
+      parsed = await aiService.generateCompletion(prompt, { temperature: 0.7 });
+    } else {
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.7,
+        response_format: { type: "json_object" },
+      });
+      parsed = JSON.parse(completion.choices[0].message.content);
     }
+
+    // Validate test case count
+    if (parsed.coding_challenge && parsed.coding_challenge.test_cases) {
+      const actualCount = parsed.coding_challenge.test_cases.length;
+      if (actualCount !== counts.testCases) {
+        console.warn(`Expected ${counts.testCases} test cases, got ${actualCount}. Adjusting...`);
+      }
+    }
+
+    console.log(`Successfully generated ${complexity} assessment`);
+    return parsed;
+  } catch (error) {
+    console.error("Error generating session questions:", error.message);
+    throw error;
+  }
 }
 
 // Multi-Provider AI Service Integration
@@ -202,23 +201,23 @@ const AIService = require("./aiService");
 let aiService = null;
 
 function initializeAIService(pool) {
-    aiService = new AIService(pool);
-    console.log("AIService initialized with multi-provider support");
+  aiService = new AIService(pool);
+  console.log("AIService initialized with multi-provider support");
 }
 
 // Use multi-provider service if available, fallback to Groq
 async function generateWithAI(prompt) {
-    if (aiService) {
-        return await aiService.generateCompletion(prompt);
-    }
-    // Fallback to direct Groq
-    const completion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.7,
-        response_format: { type: "json_object" },
-    });
-    return JSON.parse(completion.choices[0].message.content);
+  if (aiService) {
+    return await aiService.generateCompletion(prompt);
+  }
+  // Fallback to direct Groq
+  const completion = await groq.chat.completions.create({
+    messages: [{ role: "user", content: prompt }],
+    model: "llama-3.3-70b-versatile",
+    temperature: 0.7,
+    response_format: { type: "json_object" },
+  });
+  return JSON.parse(completion.choices[0].message.content);
 }
 
 module.exports = { generateAssessment, generateSessionQuestions, initializeAIService, generateWithAI };

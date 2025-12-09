@@ -126,6 +126,15 @@ else
     echo "🔒 Cloudflare Tunnel Mode: DISABLED"
     echo "Using local URLs (localhost)"
     echo "To enable tunnels, edit .env.tunnel and set ENABLE_CLOUDFLARE_TUNNEL=true"
+    
+    # Reset database URLs to localhost when tunnels are disabled
+    echo ""
+    echo "🔧 Resetting URLs to localhost in database..."
+    cat > frontend/public/config.js << 'EOF'
+// Runtime configuration - Localhost mode
+window.BACKEND_URL = 'http://localhost:3000';
+EOF
+    echo "  ✅ Frontend configured for localhost mode"
 fi
 
 # Now start docker-compose
@@ -166,6 +175,22 @@ if [ "${ENABLE_CLOUDFLARE_TUNNEL}" = "true" ]; then
     echo ""
     echo "✅ Tunnel URLs have been automatically configured!"
     echo "You can now share assessment links - they will use the tunnel URLs."
+else
+    # Tunnels disabled - set localhost URLs in database
+    echo ""
+    echo "🔧 Configuring localhost URLs in database..."
+    
+    docker compose exec -T database psql -U user -d interviewdb -c \
+        "INSERT INTO admin_settings (key, value) VALUES ('public_url_candidate', 'http://localhost:5173') 
+         ON CONFLICT (key) DO UPDATE SET value = 'http://localhost:5173';" 2>/dev/null || echo "  ⚠️  Database update failed (services may still be starting)"
+    
+    docker compose exec -T database psql -U user -d interviewdb -c \
+        "INSERT INTO admin_settings (key, value) VALUES ('public_url_backend', 'http://localhost:3000') 
+         ON CONFLICT (key) DO UPDATE SET value = 'http://localhost:3000';" 2>/dev/null || echo "  ⚠️  Database update failed (services may still be starting)"
+    
+    echo "  ✅ URLs configured for localhost mode"
+    echo ""
+    echo "✅ Assessment links will use localhost URLs (local network only)."
 fi
 
 echo ""

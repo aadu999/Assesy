@@ -1,2 +1,2 @@
-// Runtime configuration - Auto-generated
-window.BACKEND_URL = 'https://ciao-goal-travelers-lecture.trycloudflare.com';
+// Runtime configuration - Localhost mode
+window.BACKEND_URL = 'http://localhost:3000';
